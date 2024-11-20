@@ -15,13 +15,15 @@ PROPERTIES = {
     "value": str
 }
 
+
 def get_as_list(v):
     """Ensures that a value is a list"""
     if v is None:
         return []
     if type(v) is list:
         return v
-    return [ v ]
+    return [v]
+
 
 def get_as_id(v):
     """If v is an ID, return it or else return None"""
@@ -65,24 +67,28 @@ def relation_row(crate, eid, ename, prop, tid):
 
 def property_row(eid, ename, prop, value):
     return {
-            "source_id": eid,
-            "source_name": ename,
-            "property_label": prop,
-            "value": value
-        }
+        "source_id": eid,
+        "source_name": ename,
+        "property_label": prop,
+        "value": value
+    }
 
 
-def tocsv(cratedir, csvfile):
-    """Write a tabulated crate to a CSV file"""
-    crate = ROCrate(cratedir)
-    seq = 0
-    with open(csvfile, 'w', newline='', encoding='utf-8') as csvfile:
-        csvwriter = csv.writer(csvfile, dialect='excel')
-        csvwriter.writerow(HEADERS)
-        for e in crate.get_entities():
-            for row in entity_properties(crate, seq, e):
-                csvwriter.writerow(row)
-                seq += 1
+def export_csv(main_config, db):
+    queries = main_config['export_queries']
+    for csv_file, query in queries.items():
+        result = list(db.query(query))
+        # Convert result into a CSV file using csv writer
+        with open(csv_file, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL)
+            writer.writeheader()
+            for row in result:
+                for key, value in row.items():
+                    if isinstance(value, str):
+                        row[key] = value.replace('\n', '\\n').replace('\r', '\\r')
+                writer.writerow(row)
+
+        print(f"Exported data to {csv_file}")
 
 
 def tosqlite(cratedir, dbfile):
@@ -99,6 +105,7 @@ def tosqlite(cratedir, dbfile):
             propList.append(row)
     properties.insert_all(propList)
     return db
+
 
 def test(cratedir):
     """Test"""
@@ -126,22 +133,37 @@ def find_csv(input_path):
         add_csv(db, os.path.join(input_path, entity_id), f"csv_files")
 
 
-def flatten_entities(db, input_path, name, text):
+def setup_config(name, db):
     config_file = f'{name}-config.json'
 
     if not os.path.exists(config_file):
-        # Default configuration
         default_config = {
-            "tables": {
-                "export-query": [],
-                "RepositoryObject":  {"all_props": [],  # All properties found for all RepositoryObject entities
-                                      "ignore_props": [],  # Properties to ignore
-                                      # Default properties to expand
-                                      "expand_props": ["citation"]},
-                "Person": {"all_props": [], "ignore_props": [], "expand_props": []}
-            }
-
+            "export_queries": {},
+            "tables": {},
+            "potential_tables": {}
         }
+        query = f"""
+            SELECT DISTINCT(p.value)
+            FROM property p
+            WHERE p.property_label = '@type'
+        """
+        types = db.query(query)
+
+        for attype in [row['value'] for row in types]:
+            default_config["potential_tables"][attype] = {"all_props": [], "ignore_props": [], "expand_props": []}
+
+        # Default configuration
+        # default_config = {
+        #     "export_queries": {},
+        #     "tables": {
+        #         "RepositoryObject": {"all_props": [],  # All properties found for all RepositoryObject entities
+        #                              "ignore_props": [],  # Properties to ignore
+        #                              # Default properties to expand
+        #                              "expand_props": ["citation"]},
+        #         "Person": {"all_props": [], "ignore_props": [], "expand_props": []}
+        #     }
+        #
+        # }
         with open(config_file, 'w') as f:
             json.dump(default_config, f, indent=4)
         print(f"Created default config file: {config_file}")
@@ -152,6 +174,21 @@ def flatten_entities(db, input_path, name, text):
         with open(config_file, 'r') as f:
             main_config = json.load(f)
 
+    return main_config
+
+
+def save_config(main_config, name):
+    config_file = f'{name}-config.json'
+    # Save the updated configuration file
+    with open(config_file, 'w') as f:
+        json.dump(main_config, f, indent=4)
+    print(
+        f"Updated config file: {config_file}, edit this file to change the flattening configuration or deleted it to start over")
+
+    return main_config
+
+
+def flatten_entities(db, input_path, main_config, text):
     print("Building flat tables")
 
     for table in main_config['tables']:
@@ -246,15 +283,11 @@ def flatten_entities(db, input_path, name, text):
 
             config['all_props'] = list(set(config['all_props'] + props))
             # Step 4: Insert the flattened properties into the 'flat_entites' table
-
             db[f'{table}'].insert(entity_data, pk="entity_id", replace=True, alter=True),
 
     print("Flattened entities table created")
-    # Save the updated configuration file
-    with open(config_file, 'w') as f:
-        json.dump(main_config, f, indent=4)
-    print(
-        f"Updated config file: {config_file}, edit this file to change the flattening configuration or deleted it to start over")
+
+    return main_config
 
 
 def set_property_name(entity_data, property_name, property_value):
@@ -308,11 +341,11 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
 
-    if args.output.suffix == '.db':
-        db = tosqlite(args.crate, args.output)
-        flatten_entities(db, args.crate, args.name, args.text)
+    db = tosqlite(args.crate, args.output)
+    main_config = setup_config(args.name, db)
+    new_config = flatten_entities(db, args.crate, main_config, args.text)
+    save_config(new_config, args.name)
+
     if args.csv:
         find_csv(args.crate)
-    else:
-        tocsv(args.crate, args.output)
-
+    export_csv(main_config, db)
