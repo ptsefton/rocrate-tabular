@@ -3,6 +3,4 @@ import pytest
 
 @pytest.fixture
 def crates():
-	return {
-		"minimal": "./tests/minimal_crate/"
-	}
+    return {"minimal": "./tests/minimal_crate/"}
