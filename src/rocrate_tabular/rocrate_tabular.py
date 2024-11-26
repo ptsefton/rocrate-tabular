@@ -12,7 +12,7 @@ PROPERTIES = {
     "source_name": str,
     "property_label": str,
     "target_id": str,
-    "value": str
+    "value": str,
 }
 
 
@@ -59,7 +59,7 @@ def relation_row(crate, eid, ename, prop, tid):
             "source_name": ename,
             "property_label": prop,
             "target_id": tid,
-            "value": target_name
+            "value": target_name,
         }
     else:
         return property_row(eid, ename, prop, target)
@@ -70,22 +70,24 @@ def property_row(eid, ename, prop, value):
         "source_id": eid,
         "source_name": ename,
         "property_label": prop,
-        "value": value
+        "value": value,
     }
 
 
 def export_csv(main_config, db):
-    queries = main_config['export_queries']
+    queries = main_config["export_queries"]
     for csv_file, query in queries.items():
         result = list(db.query(query))
         # Convert result into a CSV file using csv writer
-        with open(csv_file, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL)
+        with open(csv_file, "w", newline="") as csvfile:
+            writer = csv.DictWriter(
+                csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
+            )
             writer.writeheader()
             for row in result:
                 for key, value in row.items():
                     if isinstance(value, str):
-                        row[key] = value.replace('\n', '\\n').replace('\r', '\\r')
+                        row[key] = value.replace("\n", "\\n").replace("\r", "\\r")
                 writer.writerow(row)
 
         print(f"Exported data to {csv_file}")
@@ -119,38 +121,38 @@ def test(cratedir):
 
 
 def find_csv(input_path):
-    query = f"""
+    query = """
         SELECT source_id
         FROM property
         WHERE property_label = '@type' AND value = 'File' AND LOWER(source_id) LIKE '%.csv'
     """
     files = db.query(query)
-    entity_ids = [row['source_id'] for row in files]
+    entity_ids = [row["source_id"] for row in files]
 
     print(entity_ids)
     for entity_id in entity_ids:
-        entity_id = entity_id.replace('#', '')
-        add_csv(db, os.path.join(input_path, entity_id), f"csv_files")
+        entity_id = entity_id.replace("#", "")
+        add_csv(db, os.path.join(input_path, entity_id), "csv_files")
 
 
 def setup_config(name, db):
-    config_file = f'{name}-config.json'
+    config_file = f"{name}-config.json"
 
     if not os.path.exists(config_file):
-        default_config = {
-            "export_queries": {},
-            "tables": {},
-            "potential_tables": {}
-        }
-        query = f"""
+        default_config = {"export_queries": {}, "tables": {}, "potential_tables": {}}
+        query = """
             SELECT DISTINCT(p.value)
             FROM property p
             WHERE p.property_label = '@type'
         """
         types = db.query(query)
 
-        for attype in [row['value'] for row in types]:
-            default_config["potential_tables"][attype] = {"all_props": [], "ignore_props": [], "expand_props": []}
+        for attype in [row["value"] for row in types]:
+            default_config["potential_tables"][attype] = {
+                "all_props": [],
+                "ignore_props": [],
+                "expand_props": [],
+            }
 
         # Default configuration
         # default_config = {
@@ -164,26 +166,27 @@ def setup_config(name, db):
         #     }
         #
         # }
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             json.dump(default_config, f, indent=4)
         print(f"Created default config file: {config_file}")
 
         main_config = default_config
     else:
         # Read configuration
-        with open(config_file, 'r') as f:
+        with open(config_file, "r") as f:
             main_config = json.load(f)
 
     return main_config
 
 
 def save_config(main_config, name):
-    config_file = f'{name}-config.json'
+    config_file = f"{name}-config.json"
     # Save the updated configuration file
-    with open(config_file, 'w') as f:
+    with open(config_file, "w") as f:
         json.dump(main_config, f, indent=4)
     print(
-        f"Updated config file: {config_file}, edit this file to change the flattening configuration or deleted it to start over")
+        f"Updated config file: {config_file}, edit this file to change the flattening configuration or deleted it to start over"
+    )
 
     return main_config
 
@@ -191,7 +194,7 @@ def save_config(main_config, name):
 def flatten_entities(db, input_path, main_config, text):
     print("Building flat tables")
 
-    for table in main_config['tables']:
+    for table in main_config["tables"]:
         # Step 1: Query to get list of @id for entities with @type = table
         print(f"Flattening table for entites of type: {table}")
         # We want to find where an @type is RepositoryObject
@@ -202,32 +205,33 @@ def flatten_entities(db, input_path, main_config, text):
         """
         print(query)
         repository_objects = db.query(query)
-        config = main_config['tables'][table]
+        config = main_config["tables"][table]
         # Convert the result to a list of @id values
-        entity_ids = [row['source_id'] for row in repository_objects]
+        entity_ids = [row["source_id"] for row in repository_objects]
 
         print(entity_ids)
 
         # Step 2: For each source_id, retrieve all its associated properties
         for entity_id in entity_ids:
             # Query to get all properties for the specific @id
-            properties = db.query(f"""
+            properties = db.query(
+                """
                 SELECT property_label, value, target_id
                 FROM property
                 WHERE source_id = ?
-            """, [entity_id])
+            """,
+                [entity_id],
+            )
 
             # Create a dictionary to hold the properties for this entity
-            entity_data = {
-                'entity_id': entity_id
-            }
+            entity_data = {"entity_id": entity_id}
 
             # Step 3: Loop through properties and add them to entity_data
             props = []
             for prop in properties:
-                property_name = prop['property_label']
-                property_value = prop['value']
-                property_target = prop['target_id']
+                property_name = prop["property_label"]
+                property_value = prop["value"]
+                property_target = prop["target_id"]
                 props.append(property_name)
 
                 if text is not None and property_name == text:
@@ -242,7 +246,7 @@ def flatten_entities(db, input_path, main_config, text):
                     text_file = os.path.join(input_path, property_target)
                     if os.path.isfile(text_file):
                         # Read the text from the file
-                        with open(text_file, 'r') as f:
+                        with open(text_file, "r") as f:
                             text_contents = f.read()
                         # Add the text to the entity_data dictionary
                         entity_data[property_name] = text_contents
@@ -251,9 +255,9 @@ def flatten_entities(db, input_path, main_config, text):
                         print(f"File not found: {text_file}")
 
                 # If the property is in the props_to_expand list, expand it
-                if property_name in config['expand_props'] and property_target:
+                if property_name in config["expand_props"] and property_target:
                     # Query to get the
-                    sub_query = f"""
+                    sub_query = """
                         SELECT p.property_label, p.value, p.target_id
                         FROM property p
                         WHERE p.source_id = ? 
@@ -264,26 +268,40 @@ def flatten_entities(db, input_path, main_config, text):
                     # Is this the indexableText property?
 
                     for expanded_prop in expanded_properties:
-                        expanded_property_name = f"{property_name}_{expanded_prop['property_label']}"
+                        expanded_property_name = (
+                            f"{property_name}_{expanded_prop['property_label']}"
+                        )
                         props.append(expanded_property_name)
                         # Special case - if this is indexable text then we want to read t
 
-                        if expanded_property_name not in config['ignore_props']:
+                        if expanded_property_name not in config["ignore_props"]:
                             set_property_name(
-                                entity_data, expanded_property_name, expanded_prop['value'])
-                            if expanded_prop['target_id']:
+                                entity_data,
+                                expanded_property_name,
+                                expanded_prop["value"],
+                            )
+                            if expanded_prop["target_id"]:
                                 set_property_name(
-                                    entity_data, f"{expanded_property_name}_id", expanded_prop['target_id'])
+                                    entity_data,
+                                    f"{expanded_property_name}_id",
+                                    expanded_prop["target_id"],
+                                )
                 else:
                     # If it's a normal property, just add it to the entity_data dictionary
-                    if property_name not in config['ignore_props']:
+                    if property_name not in config["ignore_props"]:
                         set_property_name(entity_data, property_name, property_value)
                         if property_target:
-                            set_property_name(entity_data, f"{property_name}_id", property_target)
+                            set_property_name(
+                                entity_data, f"{property_name}_id", property_target
+                            )
 
-            config['all_props'] = list(set(config['all_props'] + props))
+            config["all_props"] = list(set(config["all_props"] + props))
             # Step 4: Insert the flattened properties into the 'flat_entites' table
-            db[f'{table}'].insert(entity_data, pk="entity_id", replace=True, alter=True),
+            (
+                db[f"{table}"].insert(
+                    entity_data, pk="entity_id", replace=True, alter=True
+                ),
+            )
 
     print("Flattened entities table created")
 
@@ -301,7 +319,7 @@ def set_property_name(entity_data, property_name, property_value):
 
 
 def add_csv(db, csv_path, table_name):
-    with open(csv_path, newline='') as f:
+    with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)  # Use DictReader to read each row as a dictionary
         rows = list(reader)
         if rows:
@@ -323,21 +341,19 @@ if __name__ == "__main__":
         help="Output file (.csv or .db)",
     )
     ap.add_argument(
-        "-n", "--name",
-        default="",
-        type=str,
-        help="Write the name of the config"
+        "-n", "--name", default="", type=str, help="Write the name of the config"
     )
     ap.add_argument(
-        "-t", "--text",
+        "-t",
+        "--text",
         default=None,
         type=str,
-        help="Property label that references a file containing text for an entity"
+        help="Property label that references a file containing text for an entity",
     )
     ap.add_argument(
         "--csv",
-        action='store_true',
-        help="Find CSV files and concatenate them into a table"
+        action="store_true",
+        help="Find CSV files and concatenate them into a table",
     )
     args = ap.parse_args()
 
