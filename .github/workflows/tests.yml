@@ -1,4 +1,4 @@
-name: linters
+name: pytest
 
 on:
   push:
