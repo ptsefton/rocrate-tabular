@@ -66,6 +66,7 @@ def minimal_crate(name="Minimal crate", description="Minimal crate"):
             "name": name,
             "description": description,
             "license": {"@id": license_id},
+            "datePublished": "2024",
         },
     )
     crate.add(
