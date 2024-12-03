@@ -112,18 +112,17 @@ class ROCrateTabulator:
 
     def relation_row(self, eid, ename, prop, tid):
         """Return a row representing a relation between two entities"""
+        target_name = ""
         target = self.crate.dereference(tid)
         if target:
             target_name = target.properties().get("name", "")
-            return {
-                "source_id": eid,
-                "source_name": ename,
-                "property_label": prop,
-                "target_id": tid,
-                "value": target_name,
-            }
-        else:
-            return self.property_row(eid, ename, prop, target)
+        return {
+            "source_id": eid,
+            "source_name": ename,
+            "property_label": prop,
+            "target_id": tid,
+            "value": target_name,
+        }
 
     def property_row(self, eid, ename, prop, value):
         """Return a row representing a property"""
