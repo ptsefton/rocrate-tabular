@@ -3,7 +3,6 @@ from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
 import csv
-import os
 import json
 
 PROPERTIES = {
@@ -14,6 +13,8 @@ PROPERTIES = {
     "target_id": str,
     "value": str,
 }
+
+MAX_NUMBERED_COLS = 999  # sqllite limit
 
 
 def get_as_list(v):
@@ -34,299 +35,277 @@ def get_as_id(v):
     return None
 
 
-def entity_properties(crate, e):
-    """Returns a generator which yields all of this entity's rows"""
-    eid = e.properties().get("@id", None)
-    if eid is None:
-        return
-    ename = e.properties().get("name", "")
-    for key, value in e.properties().items():
-        if key != "@id":
-            for v in get_as_list(value):
-                maybe_id = get_as_id(v)
-                if maybe_id is not None:
-                    yield relation_row(crate, eid, ename, key, maybe_id)
-                else:
-                    yield property_row(eid, ename, key, v)
+class ROCrateTabulatorException(Exception):
+    pass
 
 
-def relation_row(crate, eid, ename, prop, tid):
-    target = crate.dereference(tid)
-    if target:
-        target_name = target.properties().get("name", "")
-        return {
-            "source_id": eid,
-            "source_name": ename,
-            "property_label": prop,
-            "target_id": tid,
-            "value": target_name,
-        }
-    else:
-        return property_row(eid, ename, prop, target)
+class ROCrateTabulator:
+    def __init__(self):
+        self.crate_dir = None
+        self.db_file = None
+        self.db = None
+        self.crate = None
+        self.cf = None
 
+    def load_config(self, config_file):
+        """Load config from file"""
+        with open(config_file, "r") as jfh:
+            self.cf = json.load(jfh)
 
-def property_row(eid, ename, prop, value):
-    return {
-        "source_id": eid,
-        "source_name": ename,
-        "property_label": prop,
-        "value": value,
-    }
-
-
-def export_csv(main_config, db):
-    queries = main_config["export_queries"]
-    for csv_file, query in queries.items():
-        result = list(db.query(query))
-        # Convert result into a CSV file using csv writer
-        with open(csv_file, "w", newline="") as csvfile:
-            writer = csv.DictWriter(
-                csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
+    def infer_config(self):
+        """Create a default config based on the properties table"""
+        if self.db is None:
+            raise ROCrateTabulatorException(
+                "Need to run crate_to_db before infer_config"
             )
-            writer.writeheader()
-            for row in result:
-                for key, value in row.items():
-                    if isinstance(value, str):
-                        row[key] = value.replace("\n", "\\n").replace("\r", "\\r")
-                writer.writerow(row)
-
-        print(f"Exported data to {csv_file}")
-
-
-def tosqlite(cratedir, dbfile):
-    """Write a tabulated crate to an SQLite file"""
-    db = Database(dbfile, recreate=True)
-    properties = db["property"].create(PROPERTIES)
-    crate = ROCrate(cratedir)
-    seq = 0
-    propList = []
-    for e in crate.get_entities():
-        for row in entity_properties(crate, e):
-            row["row_id"] = seq
-            seq += 1
-            propList.append(row)
-    properties.insert_all(propList)
-    return db
-
-
-def test(cratedir):
-    """Test"""
-    crate = ROCrate(cratedir)
-    seq = 0
-    for e in crate.get_entities():
-        for row in entity_properties(crate, e):
-            row["row_id"] = seq
-            seq += 1
-            print(row)
-
-
-def find_csv(input_path):
-    query = """
-        SELECT source_id
-        FROM property
-        WHERE property_label = '@type' AND value = 'File' AND LOWER(source_id) LIKE '%.csv'
-    """
-    files = db.query(query)
-    entity_ids = [row["source_id"] for row in files]
-
-    print(entity_ids)
-    for entity_id in entity_ids:
-        entity_id = entity_id.replace("#", "")
-        add_csv(db, os.path.join(input_path, entity_id), "csv_files")
-
-
-def setup_config(name, db):
-    config_file = f"{name}-config.json"
-
-    if not os.path.exists(config_file):
-        default_config = {"export_queries": {}, "tables": {}, "potential_tables": {}}
+        self.cf = {"export_queries": {}, "tables": {}, "potential_tables": {}}
         query = """
             SELECT DISTINCT(p.value)
             FROM property p
             WHERE p.property_label = '@type'
         """
-        types = db.query(query)
+        types = self.db.query(query)
 
         for attype in [row["value"] for row in types]:
-            default_config["potential_tables"][attype] = {
+            self.cf["potential_tables"][attype] = {
                 "all_props": [],
                 "ignore_props": [],
                 "expand_props": [],
             }
 
-        # Default configuration
-        # default_config = {
-        #     "export_queries": {},
-        #     "tables": {
-        #         "RepositoryObject": {"all_props": [],  # All properties found for all RepositoryObject entities
-        #                              "ignore_props": [],  # Properties to ignore
-        #                              # Default properties to expand
-        #                              "expand_props": ["citation"]},
-        #         "Person": {"all_props": [], "ignore_props": [], "expand_props": []}
-        #     }
-        #
-        # }
+    def write_config(self, config_file):
+        """Write the config file with any changes made"""
         with open(config_file, "w") as f:
-            json.dump(default_config, f, indent=4)
-        print(f"Created default config file: {config_file}")
+            json.dump(self.cf, f, indent=4)
 
-        main_config = default_config
-    else:
-        # Read configuration
-        with open(config_file, "r") as f:
-            main_config = json.load(f)
+    def crate_to_db(self, crate_dir, db_file):
+        """Load the crate and build the properties table"""
+        self.crate_dir = crate_dir
+        self.db_file = db_file
+        self.db = Database(self.db_file, recreate=True)
+        properties = self.db["property"].create(PROPERTIES)
+        self.crate = ROCrate(self.crate_dir)
+        seq = 0
+        propList = []
+        for e in self.crate.get_entities():
+            for row in self.entity_properties(e):
+                row["row_id"] = seq
+                seq += 1
+                propList.append(row)
+        properties.insert_all(propList)
+        return self.db
 
-    return main_config
+    def entity_properties(self, e):
+        """Returns a generator which yields all of this entity's rows"""
+        eid = e.properties().get("@id", None)
+        if eid is None:
+            return
+        ename = e.properties().get("name", "")
+        for key, value in e.properties().items():
+            if key != "@id":
+                for v in get_as_list(value):
+                    maybe_id = get_as_id(v)
+                    if maybe_id is not None:
+                        yield self.relation_row(eid, ename, key, maybe_id)
+                    else:
+                        yield self.property_row(eid, ename, key, v)
 
+    def relation_row(self, eid, ename, prop, tid):
+        """Return a row representing a relation between two entities"""
+        target = self.crate.dereference(tid)
+        if target:
+            target_name = target.properties().get("name", "")
+            return {
+                "source_id": eid,
+                "source_name": ename,
+                "property_label": prop,
+                "target_id": tid,
+                "value": target_name,
+            }
+        else:
+            return self.property_row(eid, ename, prop, target)
 
-def save_config(main_config, name):
-    config_file = f"{name}-config.json"
-    # Save the updated configuration file
-    with open(config_file, "w") as f:
-        json.dump(main_config, f, indent=4)
-    print(
-        f"Updated config file: {config_file}, edit this file to change the flattening configuration or deleted it to start over"
-    )
+    def property_row(self, eid, ename, prop, value):
+        """Return a row representing a property"""
+        return {
+            "source_id": eid,
+            "source_name": ename,
+            "property_label": prop,
+            "value": value,
+        }
 
-    return main_config
+    def entity_table(self, table, text):
+        """Build a db table for one type of entity"""
+        self.text_prop = text
 
+        for entity_id in self.fetch_ids(table):
+            properties = list(self.fetch_entity(entity_id))
+            self.flatten_one_entity(table, entity_id, properties)
 
-def flatten_entities(db, input_path, main_config, text):
-    print("Building flat tables")
+    # Some helper methods for wrapping SQLite statements
 
-    for table in main_config["tables"]:
-        # Step 1: Query to get list of @id for entities with @type = table
-        print(f"Flattening table for entites of type: {table}")
-        # We want to find where an @type is RepositoryObject
-        query = f"""
+    def fetch_ids(self, entity_type):
+        """return a generator which yields all ids of this type"""
+        rows = self.db.query(
+            """
             SELECT p.source_id
             FROM property p
-            WHERE p.property_label = '@type' AND p.value = '{table}'
-        """
-        print(query)
-        repository_objects = db.query(query)
-        config = main_config["tables"][table]
-        # Convert the result to a list of @id values
-        entity_ids = [row["source_id"] for row in repository_objects]
+            WHERE p.property_label = '@type' AND p.value = ?
+        """,
+            [entity_type],
+        )
+        for entity_id in [row["source_id"] for row in rows]:
+            yield entity_id
 
-        print(entity_ids)
-
-        # Step 2: For each source_id, retrieve all its associated properties
-        for entity_id in entity_ids:
-            # Query to get all properties for the specific @id
-            properties = db.query(
-                """
-                SELECT property_label, value, target_id
-                FROM property
-                WHERE source_id = ?
+    def fetch_entity(self, entity_id):
+        """return a generator which yields all properties for an entity"""
+        properties = self.db.query(
+            """
+            SELECT property_label, value, target_id
+            FROM property
+            WHERE source_id = ?
             """,
-                [entity_id],
-            )
+            [entity_id],
+        )
+        for prop in properties:
+            yield prop
 
-            # Create a dictionary to hold the properties for this entity
-            entity_data = {"entity_id": entity_id}
+    def flatten_one_entity(self, table, entity_id, properties):
+        """Add a single entity's properties to its table"""
+        # FIXME - analyse properties and find multiples
+        # Create a dictionary to hold the properties for this entity
+        entity_data = {"entity_id": entity_id}
+        config = self.cf["tables"][table]
+        expand_props = config.get("expand_props")
+        ignore_props = config.get("ignore_props")
+        # Loop through properties and add them to entity_data
+        props = set()
+        for prop in properties:
+            name = prop["property_label"]
+            value = prop["value"]
+            target = prop["target_id"]
+            props.add(name)
 
-            # Step 3: Loop through properties and add them to entity_data
-            props = []
-            for prop in properties:
-                property_name = prop["property_label"]
-                property_value = prop["value"]
-                property_target = prop["target_id"]
-                props.append(property_name)
-
-                if text is not None and property_name == text:
-                    print("text", property_target, property_value)
-                    # Check if the value is a valid file name
-
-                    ### HACK: Work around for the fact that the RO-Crate libary does not import File entities it does not like
-                    if not property_target:
-                        p = json.loads(property_value)
-                        property_target = p.get("@id")
-
-                    text_file = os.path.join(input_path, property_target)
-                    if os.path.isfile(text_file):
-                        # Read the text from the file
-                        with open(text_file, "r") as f:
-                            text_contents = f.read()
-                        # Add the text to the entity_data dictionary
-                        entity_data[property_name] = text_contents
-
-                    else:
-                        print(f"File not found: {text_file}")
-
-                # If the property is in the props_to_expand list, expand it
-                if property_name in config["expand_props"] and property_target:
-                    # Query to get the
-                    sub_query = """
-                        SELECT p.property_label, p.value, p.target_id
-                        FROM property p
-                        WHERE p.source_id = ? 
-                    """
-                    expanded_properties = db.query(sub_query, [property_target])
-
-                    # Add each sub-property (e.g., author.name, author.age) to the entity_data dictionary
-                    # Is this the indexableText property?
-
-                    for expanded_prop in expanded_properties:
-                        expanded_property_name = (
-                            f"{property_name}_{expanded_prop['property_label']}"
+            if self.text_prop and name == self.text_prop:
+                contents, target = self.load_text_file(prop)
+                entity_data[name] = contents
+            else:
+                if name in expand_props and target:
+                    props.update(
+                        self.add_expanded_property(
+                            entity_data, ignore_props, name, target
                         )
-                        props.append(expanded_property_name)
-                        # Special case - if this is indexable text then we want to read t
-
-                        if expanded_property_name not in config["ignore_props"]:
-                            set_property_name(
-                                entity_data,
-                                expanded_property_name,
-                                expanded_prop["value"],
-                            )
-                            if expanded_prop["target_id"]:
-                                set_property_name(
-                                    entity_data,
-                                    f"{expanded_property_name}_id",
-                                    expanded_prop["target_id"],
-                                )
+                    )
                 else:
                     # If it's a normal property, just add it to the entity_data dictionary
-                    if property_name not in config["ignore_props"]:
-                        set_property_name(entity_data, property_name, property_value)
-                        if property_target:
-                            set_property_name(
-                                entity_data, f"{property_name}_id", property_target
-                            )
+                    if name not in ignore_props:
+                        self.set_property(entity_data, name, value, target)
+        self.db[table].insert(entity_data, pk="entity_id", replace=True, alter=True)
+        props.update(config["all_props"])
+        config["all_props"] = list(props)
 
-            config["all_props"] = list(set(config["all_props"] + props))
-            # Step 4: Insert the flattened properties into the 'flat_entites' table
-            (
-                db[f"{table}"].insert(
-                    entity_data, pk="entity_id", replace=True, alter=True
-                ),
-            )
+    def add_expanded_property(self, entity_data, ignore_props, name, target):
+        """Do a subquery on a target ID to make expanded properties like
+        author_name author_id"""
+        props = set()
+        for expanded_prop in self.fetch_entity(target):
+            expanded_property_name = f"{name}_{expanded_prop['property_label']}"
+            # Special case - if this is indexable text then we want to read t
+            props.add(expanded_property_name)
+            if expanded_property_name not in ignore_props:
+                self.set_property(
+                    entity_data,
+                    expanded_property_name,
+                    expanded_prop["value"],
+                    expanded_prop["target_id"],
+                )
+        return props
 
-    print("Flattened entities table created")
+    # Both of the following mutate entity_data
 
-    return main_config
+    def set_property(self, entity_data, name, value, target_id):
+        """Add a property to entity_data, and add the target_id if defined"""
+        self.set_property_name(entity_data, name, value)
+        if target_id:
+            self.set_property_name(entity_data, f"{name}_id", target_id)
 
+    def set_property_name(self, entity_data, name, value):
+        """FIXME - strategy by property goes here"""
+        if name in entity_data:
+            # Find the first available integer to append to property_name
+            i = 1
+            while f"{name}_{i}" in entity_data:
+                i += 1
+            name = f"{name}_{i}"
+            if i > MAX_NUMBERED_COLS:
+                raise ROCrateTabulatorException(f"Too many columns for {name}")
+        entity_data[name] = value
 
-def set_property_name(entity_data, property_name, property_value):
-    if property_name in entity_data:
-        # Find the first available integer to append to property_name
-        i = 1
-        while f"{property_name}_{i}" in entity_data:
-            i += 1
-        property_name = f"{property_name}_{i}"
-    entity_data[property_name] = property_value
+    def load_text_content(self, prop):
+        """Load the contents of a text file. Returns a tuple of the
+        content and the value of property_target, which may have been
+        altered."""
 
+        ### HACK: Work around for the fact that the RO-Crate libary does not
+        ### import File entities it does not like
+        target = prop["target"]
+        if not target:
+            p = json.loads(prop["value"])
+            target = p.get("@id")
+        if target:
+            text_file = self.crate_dir / Path(target)
+            if text_file.is_file():
+                with open(text_file, "r") as f:
+                    text_contents = f.read()
+            return text_contents, target
+        else:
+            # Fixme - log a file not found error
+            return None, target
 
-def add_csv(db, csv_path, table_name):
-    with open(csv_path, newline="") as f:
-        reader = csv.DictReader(f)  # Use DictReader to read each row as a dictionary
-        rows = list(reader)
-        if rows:
-            # Insert rows into the table (the table will be created if it doesn't exist)
-            db[table_name].insert_all(rows, pk="id", alter=True, ignore=True)
+    def export_csv(self):
+        """Export csvs as configured"""
+        queries = self.config["export_queries"]
+        for csv_file, query in queries.items():
+            result = list(self.db.query(query))
+            # Convert result into a CSV file using csv writer
+            with open(csv_file, "w", newline="") as csvfile:
+                writer = csv.DictWriter(
+                    csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
+                )
+                writer.writeheader()
+                for row in result:
+                    for key, value in row.items():
+                        if isinstance(value, str):
+                            row[key] = value.replace("\n", "\\n").replace("\r", "\\r")
+                    writer.writerow(row)
+
+        # print(f"Exported data to {csv_file}")
+
+    def find_csv(self):
+        files = self.db.query("""
+        SELECT source_id
+        FROM property
+        WHERE property_label = '@type' AND value = 'File' AND LOWER(source_id) LIKE '%.csv'
+    """)
+        for entity_id in [row["source_id"] for row in files]:
+            entity_id = entity_id.replace("#", "")
+            self.add_csv(self.crate_dir / Path(entity_id), "csv_files")
+
+    def add_csv(self, csv_path, table_name):
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(
+                f
+            )  # Use DictReader to read each row as a dictionary
+            rows = list(reader)
+            if rows:
+                # Insert rows into the table (the table will be created if it doesn't exist)
+                self.db[table_name].insert_all(rows, pk="id", alter=True, ignore=True)
             # `pk="id"` assumes there's an 'id' column; if no primary key, you can remove it.
 
+
+# Style guide: all print() output should be in the section below this -
+# the library code above needs to be able to work in contexts where it has to
+# write an sqlite database to stdout
 
 if __name__ == "__main__":
     ap = ArgumentParser("RO-Crate to tables")
@@ -337,31 +316,49 @@ if __name__ == "__main__":
     )
     ap.add_argument(
         "output",
+        default="output.db",
         type=Path,
-        help="Output file (.csv or .db)",
+        help="SQLite database file",
     )
     ap.add_argument(
-        "-n", "--name", default="", type=str, help="Write the name of the config"
+        "-c", "--config", default="config.json", type=Path, help="Configuration file"
     )
     ap.add_argument(
         "-t",
         "--text",
         default=None,
         type=str,
-        help="Property label that references a file containing text for an entity",
+        help="Entities of this type will be loaded as text into the database",
     )
     ap.add_argument(
         "--csv",
         action="store_true",
-        help="Find CSV files and concatenate them into a table",
+        help="Find any CSV files and concatenate them into a table",
     )
     args = ap.parse_args()
 
-    db = tosqlite(args.crate, args.output)
-    main_config = setup_config(args.name, db)
-    new_config = flatten_entities(db, args.crate, main_config, args.text)
-    save_config(new_config, args.name)
+    tb = ROCrateTabulator()
 
-    if args.csv:
-        find_csv(args.crate)
-    export_csv(main_config, db)
+    print("Building properties table")
+    tb.crate_to_db(args.crate, args.output)
+
+    if args.config.is_file():
+        print(f"Loading config from {args.config}")
+        tb.load_config(args.config)
+    else:
+        print(f"Config {args.config} not found - generating default")
+        tb.infer_config()
+
+    for table in tb.cf["tables"]:
+        print(f"Building entity table for {table}")
+        tb.entity_table(table, args.text)  # should args.text be config?
+
+    tb.write_config(args.config)
+    print(f"""
+Updated config file: {args.config}, edit this file to change the flattening configuration or deleted it to start over
+""")
+
+    # if args.csv:
+    #     tb.find_csv_contents()
+
+    # tb.export_csv()
