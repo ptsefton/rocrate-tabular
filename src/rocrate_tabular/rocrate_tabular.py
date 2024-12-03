@@ -264,7 +264,7 @@ class ROCrateTabulator:
 
     def export_csv(self):
         """Export csvs as configured"""
-        queries = self.config["export_queries"]
+        queries = self.cf["export_queries"]
         for csv_file, query in queries.items():
             result = list(self.db.query(query))
             # Convert result into a CSV file using csv writer
