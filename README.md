@@ -14,19 +14,6 @@ Install [uv](https://docs.astral.sh/uv/), then
 
 ## Usage
 
-To build an SQLite version of a crate:
-
-    > uv run src/rocrate_tabular/rocrate_tabular.py -c path/to/crate -o out.db 
-
-To build a CSV version of the same tables:
-
-    > uv run src/rocrate_tabular/rocrate_tabular.py -c path/to/crate -o out.csv
+    > uv run src/rocrate_tabular/rocrate_tabular.py path/to/crate crate.db 
 
 
-## Todo
-
-Build this out so it's a better library:
-
-- [ ] unit tests
-- [ ] better separation of output formats
-- [ ] build tables for kinds of crate entities with sensible defaults 
