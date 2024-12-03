@@ -2,7 +2,7 @@ from pathlib import Path
 from rocrate_tabular.rocrate_tabular import ROCrateTabulator
 
 
-def test_basic(crates, tmp_path):
+def test_minimal(crates, tmp_path):
     dbfile = Path(tmp_path) / "sqlite.db"
     tb = ROCrateTabulator()
     tb.crate_to_db(crates["minimal"], dbfile)
