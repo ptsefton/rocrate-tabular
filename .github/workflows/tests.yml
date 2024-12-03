@@ -9,7 +9,7 @@ on:
       - '**'
 
 jobs:
-  lint:
+  pytest:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
