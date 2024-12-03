@@ -1,5 +1,5 @@
 # crate builder
-
+from pathlib import Path
 import json
 
 LICENSE_ID = ("https://creativecommons.org/licenses/by-nc-sa/3.0/au/",)
@@ -50,6 +50,10 @@ class JsonCrate:
     def json(self):
         return json.dumps({"@context": self.context, "@graph": self.graph}, indent=2)
 
+    def write_json(self, crate_dir):
+        with open(Path(crate_dir) / "ro-crate-metadata.json", "w") as jfh:
+            json.dump({"@context": self.context, "@graph": self.graph}, jfh, indent=2)
+
 
 def minimal_crate(name="Minimal crate", description="Minimal crate"):
     """Create ROCrate json with the minimal structure"""
@@ -94,8 +98,3 @@ def make_wide_dataset(dir):
         re["hasPart"].append({"@id": fid})
         crate.add("File", fid, {"name": fid, "encodingFormat": "text/utf-8"})
     return crate
-
-
-wcrate = make_wide_dataset("wide_test")
-
-print(wcrate.json())

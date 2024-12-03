@@ -253,7 +253,7 @@ class ROCrateTabulator:
             p = json.loads(prop["value"])
             target = p.get("@id")
         if target:
-            text_file = self.crate_dir / Path(target)
+            text_file = self.crate_dir / target
             if text_file.is_file():
                 with open(text_file, "r") as f:
                     text_contents = f.read()
@@ -289,7 +289,7 @@ class ROCrateTabulator:
     """)
         for entity_id in [row["source_id"] for row in files]:
             entity_id = entity_id.replace("#", "")
-            self.add_csv(self.crate_dir / Path(entity_id), "csv_files")
+            self.add_csv(self.crate_dir / entity_id, "csv_files")
 
     def add_csv(self, csv_path, table_name):
         with open(csv_path, newline="") as f:
@@ -358,7 +358,7 @@ if __name__ == "__main__":
 Updated config file: {args.config}, edit this file to change the flattening configuration or deleted it to start over
 """)
 
-    # if args.csv:
-    #     tb.find_csv_contents()
+    if args.csv:
+        tb.find_csv_contents()
 
-    # tb.export_csv()
+    tb.export_csv()
