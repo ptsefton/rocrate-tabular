@@ -1,4 +1,4 @@
-from rocrate.rocrate import ROCrate
+from rocrate_tabular.tinycrate import TinyCrate
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
@@ -81,13 +81,18 @@ class ROCrateTabulator:
     def crate_to_db(self, crate_dir, db_file):
         """Load the crate and build the properties table"""
         self.crate_dir = crate_dir
+        try:
+            with open(Path(crate_dir) / "ro-crate-metadata.json", "r") as jfh:
+                jsonld = json.load(jfh)
+                self.crate = TinyCrate(jsonld=jsonld)
+        except Exception as e:
+            raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
         self.db = Database(self.db_file, recreate=True)
         properties = self.db["property"].create(PROPERTIES)
-        self.crate = ROCrate(self.crate_dir)
         seq = 0
         propList = []
-        for e in self.crate.get_entities():
+        for e in self.crate.graph:
             for row in self.entity_properties(e):
                 row["row_id"] = seq
                 seq += 1
@@ -97,11 +102,11 @@ class ROCrateTabulator:
 
     def entity_properties(self, e):
         """Returns a generator which yields all of this entity's rows"""
-        eid = e.properties().get("@id", None)
+        eid = e.get("@id", None)
         if eid is None:
             return
-        ename = e.properties().get("name", "")
-        for key, value in e.properties().items():
+        ename = e.get("name", "")
+        for key, value in e.items():
             if key != "@id":
                 for v in get_as_list(value):
                     maybe_id = get_as_id(v)
@@ -113,9 +118,9 @@ class ROCrateTabulator:
     def relation_row(self, eid, ename, prop, tid):
         """Return a row representing a relation between two entities"""
         target_name = ""
-        target = self.crate.dereference(tid)
+        target = self.crate.get(tid)
         if target:
-            target_name = target.properties().get("name", "")
+            target_name = target.get("name", "")
         return {
             "source_id": eid,
             "source_name": ename,
