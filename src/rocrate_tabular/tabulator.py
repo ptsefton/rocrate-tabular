@@ -311,7 +311,8 @@ class ROCrateTabulator:
 # the library code above needs to be able to work in contexts where it has to
 # write an sqlite database to stdout
 
-if __name__ == "__main__":
+
+def cli():
     ap = ArgumentParser("RO-Crate to tables")
     ap.add_argument(
         "crate",
@@ -366,3 +367,7 @@ Updated config file: {args.config}, edit this file to change the flattening conf
         tb.find_csv_contents()
 
     tb.export_csv()
+
+
+if __name__ == "__main__":
+    cli()
