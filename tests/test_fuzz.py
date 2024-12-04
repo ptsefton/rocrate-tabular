@@ -20,13 +20,18 @@ def random_property():
     return random_word(), random_text(5)
 
 
-def test_random(tmp_path):
+def random_entity():
+    props = {"name": random_text(4), "description": random_text(11)}
+    for _ in range(30):
+        prop, val = random_property()
+        props[prop] = val
+    return props
+
+
+def test_random_props(tmp_path):
     jcrate = minimal_crate()
     for i in range(1000):
-        props = {"name": random_text(4), "description": random_text(11)}
-        for j in range(30):
-            prop, val = random_property()
-            props[prop] = val
+        props = random_entity()
         jcrate.add("Dataset", f"#ds{i:05d}", props)
     crate_dir = Path(tmp_path) / "crate"
     crate_dir.mkdir()
@@ -47,6 +52,11 @@ def test_random(tmp_path):
             else:
                 db_entity[db_prop["property_label"]] = db_prop["value"]
         assert db_entity == entity
+
+
+def test_random_entities(tmp_path):
+    jcrate = minimal_crate()
+    assert jcrate  # TODO write test
 
 
 def test_expanded_properties(tmp_path):
