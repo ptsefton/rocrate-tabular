@@ -1,9 +1,9 @@
 from pathlib import Path
-from cratebuilder import minimal_crate
 from random import choice, randint
 import string
 
 from rocrate_tabular.rocrate_tabular import ROCrateTabulator
+from rocrate_tabular.tinycrate import minimal_crate
 
 
 def random_word():
