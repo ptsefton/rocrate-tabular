@@ -23,9 +23,13 @@ class TinyCrateException(Exception):
 
 
 class TinyCrate:
-    def __init__(self):
-        self.context = "https://w3id.org/ro/crate/1.1/context"
-        self.graph = []
+    def __init__(self, jsonld=None):
+        if jsonld is not None:
+            self.context = jsonld["@context"]
+            self.graph = jsonld["@graph"]
+        else:
+            self.context = "https://w3id.org/ro/crate/1.1/context"
+            self.graph = []
 
     def add(self, t, i, props):
         json_props = dict(props)
