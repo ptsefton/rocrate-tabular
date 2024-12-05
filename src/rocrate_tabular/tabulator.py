@@ -1,9 +1,10 @@
-from rocrate_tabular.tinycrate import TinyCrate
+from rocrate_tabular.tinycrate import TinyCrate, TinyCrateException
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
 import csv
 import json
+import requests
 
 PROPERTIES = {
     "row_id": str,
@@ -78,13 +79,12 @@ class ROCrateTabulator:
         with open(config_file, "w") as f:
             json.dump(self.cf, f, indent=4)
 
-    def crate_to_db(self, crate_dir, db_file):
+    def crate_to_db(self, crate_uri, db_file):
         """Load the crate and build the properties table"""
-        self.crate_dir = crate_dir
+        self.crate_dir = crate_uri
         try:
-            with open(Path(crate_dir) / "ro-crate-metadata.json", "r") as jfh:
-                jsonld = json.load(jfh)
-                self.crate = TinyCrate(jsonld=jsonld)
+            jsonld = self._load_crate(crate_uri)
+            self.crate = TinyCrate(jsonld=jsonld, directory=crate_uri)
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
@@ -92,7 +92,7 @@ class ROCrateTabulator:
         properties = self.db["property"].create(PROPERTIES)
         seq = 0
         propList = []
-        for e in self.crate.graph:
+        for e in self.crate.all():
             for row in self.entity_properties(e):
                 row["row_id"] = seq
                 seq += 1
@@ -100,13 +100,20 @@ class ROCrateTabulator:
         properties.insert_all(propList)
         return self.db
 
+    def _load_crate(self, crate_uri):
+        if crate_uri[:4] == "http":
+            response = requests.get(crate_uri)
+            return response.json()
+        with open(Path(crate_uri) / "ro-crate-metadata.json", "r") as jfh:
+            return json.load(jfh)
+
     def entity_properties(self, e):
         """Returns a generator which yields all of this entity's rows"""
-        eid = e.get("@id", None)
+        eid = e["@id"]
         if eid is None:
             return
-        ename = e.get("name", "")
-        for key, value in e.items():
+        ename = e["name"]
+        for key, value in e.props.items():
             if key != "@id":
                 for v in get_as_list(value):
                     maybe_id = get_as_id(v)
@@ -120,7 +127,7 @@ class ROCrateTabulator:
         target_name = ""
         target = self.crate.get(tid)
         if target:
-            target_name = target.get("name", "")
+            target_name = target["name"]
         return {
             "source_id": eid,
             "source_name": ename,
@@ -191,8 +198,12 @@ class ROCrateTabulator:
             props.add(name)
 
             if self.text_prop and name == self.text_prop:
-                contents, target = self.load_text_file(prop)
-                entity_data[name] = contents
+                try:
+                    print(f"looking for target: {target}")
+                    entity_data[name] = self.crate.get(target).fetch()
+                except TinyCrateException as e:
+                    entity_data[name] = f"load failed: {e}"
+
             else:
                 if name in expand_props and target:
                     props.update(
@@ -245,27 +256,6 @@ class ROCrateTabulator:
                 raise ROCrateTabulatorException(f"Too many columns for {name}")
         entity_data[name] = value
 
-    def load_text_content(self, prop):
-        """Load the contents of a text file. Returns a tuple of the
-        content and the value of property_target, which may have been
-        altered."""
-
-        ### HACK: Work around for the fact that the RO-Crate libary does not
-        ### import File entities it does not like
-        target = prop["target"]
-        if not target:
-            p = json.loads(prop["value"])
-            target = p.get("@id")
-        if target:
-            text_file = self.crate_dir / target
-            if text_file.is_file():
-                with open(text_file, "r") as f:
-                    text_contents = f.read()
-            return text_contents, target
-        else:
-            # Fixme - log a file not found error
-            return None, target
-
     def export_csv(self):
         """Export csvs as configured"""
         queries = self.cf["export_queries"]
@@ -316,8 +306,8 @@ def cli():
     ap = ArgumentParser("RO-Crate to tables")
     ap.add_argument(
         "crate",
-        type=Path,
-        help="RO-Crate directory",
+        type=str,
+        help="RO-Crate URL or directory",
     )
     ap.add_argument(
         "output",

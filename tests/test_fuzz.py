@@ -1,23 +1,8 @@
 from pathlib import Path
-from random import choice, randint
-import string
 
 from rocrate_tabular.tabulator import ROCrateTabulator
 from rocrate_tabular.tinycrate import minimal_crate
-
-
-def random_word():
-    n = randint(1, 10) + randint(0, 5)
-    return "".join([choice(string.printable) for _ in range(n)])
-
-
-def random_text(m):
-    n = randint(1, m)
-    return " ".join([random_word() for _ in range(n)])
-
-
-def random_property():
-    return random_word(), random_text(5)
+from fuzz import random_text, random_property
 
 
 def test_random(tmp_path):
@@ -33,7 +18,7 @@ def test_random(tmp_path):
     jcrate.write_json(crate_dir)
     db_file = Path(tmp_path) / "sqlite.db"
     tb = ROCrateTabulator()
-    tb.crate_to_db(crate_dir, db_file)
+    tb.crate_to_db(str(crate_dir), db_file)
     # loop through the crate's graph and try to find every entity and check
     # the properties are all there
     for entity in jcrate.graph:

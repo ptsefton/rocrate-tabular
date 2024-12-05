@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import json
+import requests
 
 LICENSE_ID = ("https://creativecommons.org/licenses/by-nc-sa/3.0/au/",)
 LICENSE_DESCRIPTION = """
@@ -23,13 +24,14 @@ class TinyCrateException(Exception):
 
 
 class TinyCrate:
-    def __init__(self, jsonld=None):
+    def __init__(self, jsonld=None, directory=None):
         if jsonld is not None:
             self.context = jsonld["@context"]
             self.graph = jsonld["@graph"]
         else:
             self.context = "https://w3id.org/ro/crate/1.1/context"
             self.graph = []
+        self.directory = directory
 
     def add(self, t, i, props):
         json_props = dict(props)
@@ -37,10 +39,14 @@ class TinyCrate:
         json_props["@type"] = t
         self.graph.append(json_props)
 
+    def all(self):
+        """dunno about this"""
+        return [TinyEntity(self, e) for e in self.graph]
+
     def get(self, i):
         es = [e for e in self.graph if e["@id"] == i]
         if es:
-            return es[0]
+            return TinyEntity(self, es[0])
         else:
             return None
 
@@ -59,6 +65,47 @@ class TinyCrate:
     def write_json(self, crate_dir):
         with open(Path(crate_dir) / "ro-crate-metadata.json", "w") as jfh:
             json.dump({"@context": self.context, "@graph": self.graph}, jfh, indent=2)
+
+
+class TinyEntity:
+    def __init__(self, crate, ejsonld):
+        self.crate = crate
+        self.type = ejsonld["@type"]
+        self.id = ejsonld["@id"]
+        self.props = dict(ejsonld)
+
+    def __getitem__(self, prop):
+        return self.props.get(prop, None)
+
+    def __setitem__(self, prop, val):
+        self.props[prop] = val
+
+    def fetch(self):
+        """Get this entity's content"""
+        if self.id[:4] == "http":
+            return self._fetch_http()
+        else:
+            return self._fetch_file()
+
+    def _fetch_http(self):
+        response = requests.get(self.id)
+        if response.ok:
+            return response.text
+        raise TinyCrateException(
+            f"http request to {self.id} failed with status {response.status_code}"
+        )
+
+    def _fetch_file(self):
+        if self.crate.directory is None:
+            # maybe use pwd for this?
+            raise TinyCrateException("Can't load file: no crate directory")
+        fn = Path(self.crate.directory) / self.id
+        try:
+            with open(fn, "r") as fh:
+                content = fh.read()
+                return content
+        except Exception as e:
+            raise TinyCrateException(f"File read failed: {e}")
 
 
 def minimal_crate(name="Minimal crate", description="Minimal crate"):
