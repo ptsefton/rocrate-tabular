@@ -92,7 +92,7 @@ class ROCrateTabulator:
         properties = self.db["property"].create(PROPERTIES)
         seq = 0
         propList = []
-        for e in self.crate.graph:
+        for e in self.crate.all():
             for row in self.entity_properties(e):
                 row["row_id"] = seq
                 seq += 1
@@ -102,11 +102,11 @@ class ROCrateTabulator:
 
     def entity_properties(self, e):
         """Returns a generator which yields all of this entity's rows"""
-        eid = e.get("@id", None)
+        eid = e["@id"]
         if eid is None:
             return
-        ename = e.get("name", "")
-        for key, value in e.items():
+        ename = e["name"]
+        for key, value in e.props.items():
             if key != "@id":
                 for v in get_as_list(value):
                     maybe_id = get_as_id(v)
@@ -120,7 +120,7 @@ class ROCrateTabulator:
         target_name = ""
         target = self.crate.get(tid)
         if target:
-            target_name = target.get("name", "")
+            target_name = target["name"]
         return {
             "source_id": eid,
             "source_name": ename,

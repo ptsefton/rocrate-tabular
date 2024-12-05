@@ -37,10 +37,14 @@ class TinyCrate:
         json_props["@type"] = t
         self.graph.append(json_props)
 
+    def all(self):
+        """dunno about this"""
+        return [TinyEntity(e) for e in self.graph]
+
     def get(self, i):
         es = [e for e in self.graph if e["@id"] == i]
         if es:
-            return es[0]
+            return TinyEntity(es[0])
         else:
             return None
 
@@ -59,6 +63,19 @@ class TinyCrate:
     def write_json(self, crate_dir):
         with open(Path(crate_dir) / "ro-crate-metadata.json", "w") as jfh:
             json.dump({"@context": self.context, "@graph": self.graph}, jfh, indent=2)
+
+
+class TinyEntity:
+    def __init__(self, ejsonld):
+        self.type = ejsonld["@type"]
+        self.id = ejsonld["@id"]
+        self.props = dict(ejsonld)
+
+    def __getitem__(self, prop):
+        return self.props.get(prop, None)
+
+    def __setitem__(self, prop, val):
+        self.props[prop] = val
 
 
 def minimal_crate(name="Minimal crate", description="Minimal crate"):
