@@ -84,7 +84,7 @@ class ROCrateTabulator:
         try:
             with open(Path(crate_dir) / "ro-crate-metadata.json", "r") as jfh:
                 jsonld = json.load(jfh)
-                self.crate = TinyCrate(jsonld=jsonld)
+                self.crate = TinyCrate(jsonld=jsonld, directory=crate_dir)
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
@@ -192,9 +192,10 @@ class ROCrateTabulator:
 
             if self.text_prop and name == self.text_prop:
                 try:
-                    entity_data[name] = self.crate.get(entity_id).fetch()
+                    print(f"looking for target: {target}")
+                    entity_data[name] = self.crate.get(target).fetch()
                 except TinyCrateException as e:
-                    entity_data[name] = f"load failed: {e.message}"
+                    entity_data[name] = f"load failed: {e}"
 
             else:
                 if name in expand_props and target:
