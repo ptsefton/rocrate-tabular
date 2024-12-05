@@ -25,9 +25,24 @@
             {
                 "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
             },
-            "hasPart": { "@id": "textfile.txt" }
+            "hasPart": { "@id": "#doc001" }
         },
-        {   "@id": "textfile.txt",
+        {
+            "@id": "doc001",
+            "@type": "Dataset",
+            "name": "A text file for testing",
+            "indexableText": { "@id": "textfile.txt" },
+            "hasPart": [
+                { "@id": "doc001/textfile.txt" },
+                { "@id": "doc001/somethingelse.txt" },
+            ]
+        },
+        {   "@id": "doc001/textfile.txt",
+            "@type": "File", 
+            "name": "text file",
+            "contentEncoding": "text/plain"
+        },
+        {   "@id": "doc001/somethingelse.txt",
             "@type": "File", 
             "name": "text file",
             "contentEncoding": "text/plain"
