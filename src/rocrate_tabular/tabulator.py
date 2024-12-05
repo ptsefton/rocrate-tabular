@@ -4,6 +4,7 @@ from pathlib import Path
 from sqlite_utils import Database
 import csv
 import json
+import requests
 
 PROPERTIES = {
     "row_id": str,
@@ -78,13 +79,12 @@ class ROCrateTabulator:
         with open(config_file, "w") as f:
             json.dump(self.cf, f, indent=4)
 
-    def crate_to_db(self, crate_dir, db_file):
+    def crate_to_db(self, crate_uri, db_file):
         """Load the crate and build the properties table"""
-        self.crate_dir = crate_dir
+        self.crate_dir = crate_uri
         try:
-            with open(Path(crate_dir) / "ro-crate-metadata.json", "r") as jfh:
-                jsonld = json.load(jfh)
-                self.crate = TinyCrate(jsonld=jsonld, directory=crate_dir)
+            jsonld = self._load_crate(crate_uri)
+            self.crate = TinyCrate(jsonld=jsonld, directory=crate_uri)
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
@@ -99,6 +99,13 @@ class ROCrateTabulator:
                 propList.append(row)
         properties.insert_all(propList)
         return self.db
+
+    def _load_crate(self, crate_uri):
+        if crate_uri[:4] == "http":
+            response = requests.get(crate_uri)
+            return response.json()
+        with open(Path(crate_uri) / "ro-crate-metadata.json", "r") as jfh:
+            return json.load(jfh)
 
     def entity_properties(self, e):
         """Returns a generator which yields all of this entity's rows"""
@@ -299,8 +306,8 @@ def cli():
     ap = ArgumentParser("RO-Crate to tables")
     ap.add_argument(
         "crate",
-        type=Path,
-        help="RO-Crate directory",
+        type=str,
+        help="RO-Crate URL or directory",
     )
     ap.add_argument(
         "output",
