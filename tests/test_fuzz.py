@@ -1,23 +1,8 @@
 from pathlib import Path
-from random import choice, randint
-import string
 
 from rocrate_tabular.tabulator import ROCrateTabulator
 from rocrate_tabular.tinycrate import minimal_crate
-
-
-def random_word():
-    n = randint(1, 10) + randint(0, 5)
-    return "".join([choice(string.printable) for _ in range(n)])
-
-
-def random_text(m):
-    n = randint(1, m)
-    return " ".join([random_word() for _ in range(n)])
-
-
-def random_property():
-    return random_word(), random_text(5)
+from fuzz import random_text, random_property
 
 
 def test_random(tmp_path):
