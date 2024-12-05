@@ -1,8 +1,10 @@
 # from pathlib import Path
 
+import json
+from pathlib import Path
 from fuzz import random_text, random_property
 
-from rocrate_tabular.tinycrate import minimal_crate
+from rocrate_tabular.tinycrate import TinyCrate, minimal_crate
 
 
 def test_crate(tmp_path):
@@ -14,4 +16,13 @@ def test_crate(tmp_path):
             prop, val = random_property()
             props[prop] = val
         jcrate.add("Dataset", f"#ds{i:05d}", props)
-    assert jcrate
+    jsonf = Path(tmp_path) / "ro-crate-metadata.json"
+    jcrate.write_json(Path(tmp_path))
+    with open(jsonf, "r") as jfh:
+        jsonld = json.load(jfh)
+        jcrate2 = TinyCrate(jsonld=jsonld)
+        for i in range(1000):
+            eid = f"#ds{i:05d}"
+            ea = jcrate.get(eid)
+            eb = jcrate2.get(eid)
+            assert ea.props == eb.props
