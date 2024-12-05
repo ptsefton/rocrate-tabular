@@ -6,6 +6,8 @@ from fuzz import random_text, random_property
 
 from rocrate_tabular.tinycrate import TinyCrate, minimal_crate
 
+# https://pytest-httpserver.readthedocs.io/en/latest/ for testing fetch
+
 
 def test_crate(tmp_path):
     """Build and save and reload a crate"""
@@ -26,3 +28,15 @@ def test_crate(tmp_path):
             ea = jcrate.get(eid)
             eb = jcrate2.get(eid)
             assert ea.props == eb.props
+
+
+def test_load_file(crates):
+    cratedir = crates["textfiles"]
+    with open(Path(cratedir) / "ro-crate-metadata.json", "r") as jfh:
+        jsonld = json.load(jfh)
+        crate = TinyCrate(jsonld=jsonld, directory=cratedir)
+        tfile = crate.get("textfile.txt")
+        contents = tfile.fetch()
+        with open(Path(cratedir) / "textfile.txt", "r") as tfh:
+            contents2 = tfh.read()
+            assert contents == contents2
