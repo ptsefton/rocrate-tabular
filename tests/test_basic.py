@@ -1,5 +1,5 @@
 from pathlib import Path
-from rocrate_tabular.rocrate_tabular import ROCrateTabulator
+from rocrate_tabular.tabulator import ROCrateTabulator
 
 
 def test_minimal(crates, tmp_path):
