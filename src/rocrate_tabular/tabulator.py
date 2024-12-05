@@ -191,7 +191,7 @@ class ROCrateTabulator:
             props.add(name)
 
             if self.text_prop and name == self.text_prop:
-                contents, target = self.load_text_file(prop)
+                contents, target = self.load_text_content(prop)
                 entity_data[name] = contents
             else:
                 if name in expand_props and target:
