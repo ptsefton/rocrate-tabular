@@ -37,9 +37,9 @@ def test_load_file(crates):
     with open(Path(cratedir) / "ro-crate-metadata.json", "r") as jfh:
         jsonld = json.load(jfh)
         crate = TinyCrate(jsonld=jsonld, directory=cratedir)
-        tfile = crate.get("textfile.txt")
+        tfile = crate.get("doc001/textfile.txt")
         contents = tfile.fetch()
-        with open(Path(cratedir) / "textfile.txt", "r") as tfh:
+        with open(Path(cratedir) / "doc001" / "textfile.txt", "r") as tfh:
             contents2 = tfh.read()
             assert contents == contents2
 

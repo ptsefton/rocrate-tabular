@@ -18,7 +18,7 @@ def test_random(tmp_path):
     jcrate.write_json(crate_dir)
     db_file = Path(tmp_path) / "sqlite.db"
     tb = ROCrateTabulator()
-    tb.crate_to_db(crate_dir, db_file)
+    tb.crate_to_db(str(crate_dir), db_file)
     # loop through the crate's graph and try to find every entity and check
     # the properties are all there
     for entity in jcrate.graph:
