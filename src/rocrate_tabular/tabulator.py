@@ -1,4 +1,4 @@
-from rocrate_tabular.tinycrate import TinyCrate
+from rocrate_tabular.tinycrate import TinyCrate, TinyCrateException
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
@@ -191,8 +191,11 @@ class ROCrateTabulator:
             props.add(name)
 
             if self.text_prop and name == self.text_prop:
-                contents, target = self.load_text_content(prop)
-                entity_data[name] = contents
+                try:
+                    entity_data[name] = self.crate.get(entity_id).fetch()
+                except TinyCrateException as e:
+                    entity_data[name] = f"load failed: {e.message}"
+
             else:
                 if name in expand_props and target:
                     props.update(
@@ -244,27 +247,6 @@ class ROCrateTabulator:
             if i > MAX_NUMBERED_COLS:
                 raise ROCrateTabulatorException(f"Too many columns for {name}")
         entity_data[name] = value
-
-    def load_text_content(self, prop):
-        """Load the contents of a text file. Returns a tuple of the
-        content and the value of property_target, which may have been
-        altered."""
-
-        ### HACK: Work around for the fact that the RO-Crate libary does not
-        ### import File entities it does not like
-        target = prop["target"]
-        if not target:
-            p = json.loads(prop["value"])
-            target = p.get("@id")
-        if target:
-            text_file = self.crate_dir / target
-            if text_file.is_file():
-                with open(text_file, "r") as f:
-                    text_contents = f.read()
-            return text_contents, target
-        else:
-            # Fixme - log a file not found error
-            return None, target
 
     def export_csv(self):
         """Export csvs as configured"""
