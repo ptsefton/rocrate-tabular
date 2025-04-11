@@ -128,7 +128,9 @@ class ROCrateTabulator:
         if crate_uri[:4] == "http":
             response = requests.get(crate_uri)
             return response.json()
-        with open(Path(crate_uri) / "ro-crate-metadata.json", "r") as jfh:
+        with open(
+            Path(crate_uri) / "ro-crate-metadata.json", "r", encoding="utf-8"
+        ) as jfh:
             return json.load(jfh)
 
     def entity_properties(self, e):
