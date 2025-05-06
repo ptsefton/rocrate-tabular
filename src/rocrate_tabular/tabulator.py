@@ -1,6 +1,6 @@
 from os import PathLike
 
-from rocrate_tabular.tinycrate import TinyCrate, TinyCrateException
+from rocrate_tabular.tinycrate import TinyCrate, TinyCrateException, minimal_crate
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
@@ -49,6 +49,12 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
+        # TODO move to load_config later
+        self.schemaCrate = minimal_crate()
+        self.schemaCrate.add(
+            "csvw:Schema","#schema", {"columns": []}
+        )
+
 
     def load_config(self, config_file):
         """Load config from file"""
@@ -282,13 +288,21 @@ class ROCrateTabulator:
                 raise ROCrateTabulatorException(f"Too many columns for {name}")
         entity_data[name] = value
 
-    def export_csv(self):
+    def export_csv(self, rocrate_dir):
         """Export csvs as configured"""
         queries = self.cf["export_queries"]
-        for csv_file, query in queries.items():
+        
+        # Ensure rocrate_dir exists if it's provided
+        if rocrate_dir is not None:
+            Path(rocrate_dir).mkdir(parents=True, exist_ok=True)
+            
+        for csv_filename, query in queries.items():
             result = list(self.db.query(query))
             # Convert result into a CSV file using csv writer
-            with open(csv_file, "w", newline="") as csvfile:
+            csv_path = csv_filename
+            if (rocrate_dir is not None):
+                csv_path = Path(rocrate_dir) / csv_filename
+            with open(csv_path, "w", newline="") as csvfile:
                 writer = csv.DictWriter(
                     csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
                 )
@@ -298,8 +312,8 @@ class ROCrateTabulator:
                         if isinstance(value, str):
                             row[key] = value.replace("\n", "\\n").replace("\r", "\\r")
                     writer.writerow(row)
-
-        # print(f"Exported data to {csv_file}")
+        self.schemaCrate.write_json(rocrate_dir)
+        print(f"Exported data to {csv_path}")
 
     def find_csv(self):
         files = self.db.query("""
@@ -345,6 +359,9 @@ def cli():
         "-c", "--config", default="config.json", type=Path, help="Configuration file"
     )
     ap.add_argument(
+        "-r", "--ro-crate", default=None, type=Path, help="Export CSVs to an RO-Crate directory"
+    )
+    ap.add_argument(
         "-t",
         "--text",
         default=None,
@@ -382,7 +399,7 @@ Updated config file: {args.config}, edit this file to change the flattening conf
     if args.csv:
         tb.find_csv_contents()
 
-    tb.export_csv()
+    tb.export_csv(args.ro_crate)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from pathlib import Path
 import json
 import requests
+import datetime  # Added import for datetime
 
 LICENSE_ID = ("https://creativecommons.org/licenses/by-nc-sa/3.0/au/",)
 LICENSE_DESCRIPTION = """
@@ -31,6 +32,10 @@ class TinyCrate:
         else:
             self.context = "https://w3id.org/ro/crate/1.1/context"
             self.graph = []
+        self.directory = directory
+
+    def set_directory(self, directory):
+        """Set the directory for this crate"""
         self.directory = directory
 
     def add(self, t, i, props):
@@ -62,7 +67,11 @@ class TinyCrate:
     def json(self):
         return json.dumps({"@context": self.context, "@graph": self.graph}, indent=2)
 
-    def write_json(self, crate_dir):
+    def write_json(self, crate_dir = None):
+        """Write the json-ld to a file"""
+        if crate_dir is None:   # if no directory is set, use the current working directory
+            crate_dir = self.directory or "."
+        Path(crate_dir).mkdir(parents=True, exist_ok=True)
         with open(Path(crate_dir) / "ro-crate-metadata.json", "w") as jfh:
             json.dump({"@context": self.context, "@graph": self.graph}, jfh, indent=2)
 
@@ -119,7 +128,7 @@ def minimal_crate(name="Minimal crate", description="Minimal crate"):
             "name": name,
             "description": description,
             "license": {"@id": license_id},
-            "datePublished": "2024",
+            "datePublished": datetime.datetime.now().year,  # Using datetime to get current year
         },
     )
     crate.add(
