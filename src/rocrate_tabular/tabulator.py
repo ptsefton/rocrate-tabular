@@ -288,7 +288,7 @@ class ROCrateTabulator:
         for csv_file, query in queries.items():
             result = list(self.db.query(query))
             # Convert result into a CSV file using csv writer
-            with open(csv_file, "w", newline="") as csvfile:
+            with open(csv_file, "w", newline="", encoding="utf-8") as csvfile:
                 writer = csv.DictWriter(
                     csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
                 )
@@ -312,7 +312,7 @@ class ROCrateTabulator:
             self.add_csv(self.crate_dir / entity_id, "csv_files")
 
     def add_csv(self, csv_path, table_name):
-        with open(csv_path, newline="") as f:
+        with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(
                 f
             )  # Use DictReader to read each row as a dictionary
