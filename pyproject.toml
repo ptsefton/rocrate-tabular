@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.32.3",
     "sqlite-utils>=3.37",
+    "pyld>=2.0.3",
 ]
 
 [project.scripts]
