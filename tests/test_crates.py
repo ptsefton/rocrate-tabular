@@ -53,7 +53,11 @@ def test_load_utf8(crates):
         crate = TinyCrate(jsonld=jsonld, directory=cratedir)
         tfile = crate.get("data/2-035-plain.txt")
         contents = tfile.fetch()
-        with open(Path(cratedir) / "data" / "2-035-plain.txt", "r") as tfh:
+        # note: have to also explicitly set the encoding on this read so that
+        # it doesn't also break the tests
+        with open(
+            Path(cratedir) / "data" / "2-035-plain.txt", "r", encoding="utf-8"
+        ) as tfh:
             contents2 = tfh.read()
             assert contents == contents2
 
