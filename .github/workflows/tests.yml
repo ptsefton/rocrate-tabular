@@ -10,9 +10,13 @@ on:
 
 jobs:
   pytest:
+
+    runs-on: ${{ matrix.os }}
+
     strategy:
         matrix:
             os: [ubuntu-latest, windows-latest]
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
