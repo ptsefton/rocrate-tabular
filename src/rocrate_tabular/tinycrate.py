@@ -101,7 +101,7 @@ class TinyEntity:
             raise TinyCrateException("Can't load file: no crate directory")
         fn = Path(self.crate.directory) / self.id
         try:
-            with open(fn, "r", encoding="utf-8") as fh:
+            with open(fn, "r") as fh:  # encoding = utf-8
                 content = fh.read()
                 return content
         except Exception as e:
