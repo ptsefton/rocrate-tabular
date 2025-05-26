@@ -124,6 +124,10 @@ class ROCrateTabulator:
         properties.insert_all(propList)
         return self.db
 
+    def close(self):
+        """Close the connection to the SQLite database - for Windows users"""
+        self.db.close()
+
     def _load_crate(self, crate_uri):
         if crate_uri[:4] == "http":
             response = requests.get(crate_uri)

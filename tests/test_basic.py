@@ -22,7 +22,7 @@ def test_config(crates, tmp_path):
     tb.crate_to_db(crates["minimal"], dbfile)
     tb.infer_config()
     tb.write_config(conffile)
-    tb.db.close()  # for Windows
+    tb.close()  # for Windows
     # smoke test to make sure another tabulator can read the config
     tb2 = ROCrateTabulator()
     tb2.crate_to_db(crates["minimal"], dbfile)
