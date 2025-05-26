@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0]
 
-Last version before breaking TinyCrate out to its own library. Added more test
-cases including a utf-8 file which was breaking on Windows
+Version prior to putting TinyCrate in its own repo. Attempt to deal with the
+Windows problem
 
 ## [0.0.1]
 
