@@ -1,6 +1,6 @@
 from os import PathLike
 
-from rocrate_tabular.tinycrate import TinyCrate, TinyCrateException
+from tinycrate.tinycrate import TinyCrate, TinyCrateException
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
@@ -108,7 +108,7 @@ class ROCrateTabulator:
         self.crate_dir = crate_uri
         try:
             jsonld = self._load_crate(crate_uri)
-            self.crate = TinyCrate(jsonld=jsonld, directory=crate_uri)
+            self.crate = TinyCrate(jsonld)
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
