@@ -1,7 +1,7 @@
 from pathlib import Path
-
+import pytest
 from rocrate_tabular.tabulator import ROCrateTabulator
-from rocrate_tabular.tinycrate import minimal_crate
+from tinycrate.tinycrate import minimal_crate
 from fuzz import random_text, random_property
 
 
@@ -34,5 +34,6 @@ def test_random(tmp_path):
         assert db_entity == entity
 
 
+@pytest.mark.skip("Not implemented")
 def test_expanded_properties(tmp_path):
     assert True
