@@ -4,6 +4,7 @@ from tinycrate.tinycrate import TinyCrate, TinyCrateException
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
+from tqdm import tqdm
 import csv
 import json
 import requests
@@ -116,7 +117,7 @@ class ROCrateTabulator:
         properties = self.db["property"].create(PROPERTIES)
         seq = 0
         propList = []
-        for e in self.crate.all():
+        for e in tqdm(self.crate.all()):
             for row in self.entity_properties(e):
                 row["row_id"] = seq
                 seq += 1
@@ -179,7 +180,7 @@ class ROCrateTabulator:
         """Build a db table for one type of entity"""
         self.text_prop = text
 
-        for entity_id in self.fetch_ids(table):
+        for entity_id in tqdm(list(self.fetch_ids(table))):
             properties = list(self.fetch_entity(entity_id))
             self.flatten_one_entity(table, entity_id, properties)
 
