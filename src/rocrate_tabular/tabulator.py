@@ -51,7 +51,7 @@ class ROCrateTabulator:
         self.crate = None
         self.cf = None
 
-    def load_config(self, config_file):
+    def read_config(self, config_file):
         """Load config from file"""
         close_file = False
         if isinstance(config_file, (str, PathLike)):
@@ -289,6 +289,7 @@ class ROCrateTabulator:
 
     def export_csv(self):
         """Export csvs as configured"""
+
         queries = self.cf["export_queries"]
         for csv_file, query in queries.items():
             result = list(self.db.query(query))
@@ -370,7 +371,7 @@ def cli():
 
     if args.config.is_file():
         print(f"Loading config from {args.config}")
-        tb.load_config(args.config)
+        tb.read_config(args.config)
     else:
         print(f"Config {args.config} not found - generating default")
         tb.infer_config()
