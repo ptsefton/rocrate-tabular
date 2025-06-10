@@ -8,6 +8,10 @@ from tqdm import tqdm
 import csv
 import json
 import requests
+import sys
+from collections import defaultdict
+
+# FIXME: logging
 
 PROPERTIES = {
     "row_id": str,
@@ -18,7 +22,8 @@ PROPERTIES = {
     "value": str,
 }
 
-MAX_NUMBERED_COLS = 999  # sqllite limit
+MAX_NUMBERED_COLS = 10
+# MAX_NUMBERED_COLS = 999  # sqllite limit
 
 
 def get_as_list(v):
@@ -50,6 +55,7 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
+        self.tables = {}
 
     def read_config(self, config_file):
         """Load config from file"""
@@ -179,10 +185,30 @@ class ROCrateTabulator:
     def entity_table(self, table, text):
         """Build a db table for one type of entity"""
         self.text_prop = text
-
+        self.entity_table_plan(table)
         for entity_id in tqdm(list(self.fetch_ids(table))):
             properties = list(self.fetch_entity(entity_id))
             self.flatten_one_entity(table, entity_id, properties)
+
+    def entity_table_plan(self, table):
+        """Check entity relations to see if any need to be done as a junction
+        table to avoid huge numbers of expanded columns"""
+        prop_max = defaultdict(int)
+        # FIXME - should be able to force junctions with config here
+        if "junctions" not in self.cf["tables"][table]:
+            self.cf["tables"][table]["junctions"] = []
+        for entity_id in self.fetch_ids(table):
+            prop_count = defaultdict(int)
+            for property in self.fetch_entity(entity_id):
+                label = property["property_label"]
+                prop_count[label] += 1
+            for label, count in prop_count.items():
+                if count > prop_max[label]:
+                    prop_max[label] = count
+        for label, count in prop_max.items():
+            if count > MAX_NUMBERED_COLS:
+                print(f"{table}.{label} > {MAX_NUMBERED_COLS} members")
+                self.cf["tables"][table]["junctions"].append(label)
 
     # Some helper methods for wrapping SQLite statements
 
@@ -214,7 +240,6 @@ class ROCrateTabulator:
 
     def flatten_one_entity(self, table, entity_id, properties):
         """Add a single entity's properties to its table"""
-        # FIXME - analyse properties and find multiples
         # Create a dictionary to hold the properties for this entity
         entity_data = {"entity_id": entity_id}
         config = self.cf["tables"][table]
@@ -239,18 +264,18 @@ class ROCrateTabulator:
                 if name in expand_props and target:
                     props.update(
                         self.add_expanded_property(
-                            entity_data, ignore_props, name, target
+                            table, entity_data, ignore_props, name, target
                         )
                     )
                 else:
                     # If it's a normal property, just add it to the entity_data dictionary
                     if name not in ignore_props:
-                        self.set_property(entity_data, name, value, target)
+                        self.set_property(table, entity_data, name, value, target)
         self.db[table].insert(entity_data, pk="entity_id", replace=True, alter=True)
         props.update(config["all_props"])
         config["all_props"] = list(props)
 
-    def add_expanded_property(self, entity_data, ignore_props, name, target):
+    def add_expanded_property(self, table, entity_data, ignore_props, name, target):
         """Do a subquery on a target ID to make expanded properties like
         author_name author_id"""
         props = set()
@@ -260,6 +285,7 @@ class ROCrateTabulator:
             props.add(expanded_property_name)
             if expanded_property_name not in ignore_props:
                 self.set_property(
+                    table,
                     entity_data,
                     expanded_property_name,
                     expanded_prop["value"],
@@ -268,15 +294,18 @@ class ROCrateTabulator:
         return props
 
     # Both of the following mutate entity_data
+    # FIXME this needs refactoring
 
-    def set_property(self, entity_data, name, value, target_id):
+    def set_property(self, table, entity_data, name, value, target_id):
         """Add a property to entity_data, and add the target_id if defined"""
-        self.set_property_name(entity_data, name, value)
-        if target_id:
-            self.set_property_name(entity_data, f"{name}_id", target_id)
+        if name in self.cf["tables"][table]["junctions"]:
+            print("junctions not implemented yet", file=sys.stderr)
+        else:
+            self.set_property_name_numbered(entity_data, name, value)
+            if target_id:
+                self.set_property_name_numbered(entity_data, f"{name}_id", target_id)
 
-    def set_property_name(self, entity_data, name, value):
-        """FIXME - strategy by property goes here"""
+    def set_property_name_numbered(self, entity_data, name, value):
         if name in entity_data:
             # Find the first available integer to append to property_name
             i = 1
@@ -319,9 +348,7 @@ class ROCrateTabulator:
 
     def add_csv(self, csv_path, table_name):
         with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(
-                f
-            )  # Use DictReader to read each row as a dictionary
+            reader = csv.DictReader(f)
             rows = list(reader)
             if rows:
                 # Insert rows into the table (the table will be created if it doesn't exist)
