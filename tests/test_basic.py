@@ -59,4 +59,4 @@ def test_one_to_lots(crates, tmp_path):
     tb.crate_to_db(crates["wide"], dbfile)
 
     for table in cf["tables"]:
-        tb.entity_table(table, None)  # no text props
+        tb.entity_table(table)

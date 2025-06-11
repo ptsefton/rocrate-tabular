@@ -11,7 +11,37 @@ import requests
 import sys
 from collections import defaultdict
 
+from dataclasses import dataclass, field
+
 # FIXME: logging
+
+# TERMINOLOGY
+
+# a 'relation' is an entity which refers to another entity by some property
+# whose value is like { '@id': '#foo' }
+
+# a 'junction' is a many-to-many relation through its own table which is
+# used to capture relations in the database like:
+#
+# [
+#   {
+#       "@id": "#adocument"
+#       "name": "Title of Document"
+#       "author": [
+#           { "@id": "#jdoe" },
+#           { "@id": "#jroe" }
+#       ]
+#   },
+#   {
+#       "@id": "#jdoe",
+#       "name": "John Doe"
+#   },
+#   {
+#       "@id": "#jroe",
+#       "name": "Jane Roe"
+#   }
+# ]
+
 
 PROPERTIES = {
     "row_id": str,
@@ -48,6 +78,94 @@ class ROCrateTabulatorException(Exception):
     pass
 
 
+@dataclass
+class EntityRecord:
+    """Class which represents an entity as mapped to a database row,
+    plus any records which are used in junction tables"""
+
+    table: str
+    tabulator: object
+    entity_id: str
+    expand_props: list = field(default_factory=list)
+    ignore_props: list = field(default_factory=list)
+    props: set = field(default_factory=set)
+    data: dict = field(default_factory=dict)
+    junctions: list = field(default_factory=list)
+
+    def build(self, properties):
+        """Takes the properties of this entity and builds a dictionary to
+        be inserted into the database, plus any junction records required"""
+        self.data["entity_id"] = self.entity_id
+        self.cf = self.tabulator.cf["tables"][self.table]
+        self.text_prop = self.tabulator.text_prop
+        self.expand_props = self.cf.get("expand_props", [])
+        self.ignore_props = self.cf.get("ignore_props", [])
+        for prop in properties:
+            name = prop["property_label"]
+            value = prop["value"]
+            target = prop["target_id"]
+            self.props.add(name)
+            if self.text_prop and name == self.text_prop:
+                try:
+                    self.data[name] = self.crate.get(target).fetch()
+                except TinyCrateException as e:
+                    self.data[name] = f"load failed: {e}"
+            else:
+                if name in self.expand_props and target:
+                    self.add_expanded_property(name, target)
+                else:
+                    if name not in self.ignore_props:
+                        self.set_property(name, value, target)
+        self.props.update(self.cf.get("all_props"))
+        # config["all_props"] = list(props) not here FIXME
+
+    def add_expanded_property(self, name, target):
+        """Do a subquery on a target ID to make expanded properties like
+        author_name author_id"""
+        for expanded_prop in self.tabulator.fetch_properties(target):
+            expanded_property_name = f"{name}_{expanded_prop['property_label']}"
+            # Special case - if this is indexable text then we want to read t
+            self.props.add(expanded_property_name)
+            if expanded_property_name not in self.ignore_props:
+                self.set_property(
+                    expanded_property_name,
+                    expanded_prop["value"],
+                    expanded_prop["target_id"],
+                )
+
+    def set_property(self, name, value, target_id):
+        """Add a property to entity_data, and add the target_id if defined"""
+        if name in self.cf["junctions"]:
+            print("junctions not implemented yet", file=sys.stderr)
+        else:
+            self.set_property_name_numbered(name, value)
+            if target_id:
+                self.set_property_name_numbered(f"{name}_id", target_id)
+
+    def set_property_name_numbered(self, name, value):
+        if name in self.data:
+            # Find the first available integer to append to property_name
+            i = 1
+            while f"{name}_{i}" in self.data:
+                i += 1
+            name = f"{name}_{i}"
+            if i > MAX_NUMBERED_COLS:
+                raise ROCrateTabulatorException(f"Too many columns for {name}")
+        self.data[name] = value
+
+    def add_junctions(self, table, entity_id, junctions):
+        """Add junctions between an entity and related entities"""
+        pass
+
+
+@dataclass
+class JunctionRecord:
+    """Class which represents a junction table"""
+
+    table: str
+    data: dict
+
+
 class ROCrateTabulator:
     def __init__(self):
         self.crate_dir = None
@@ -55,6 +173,7 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
+        self.text_prop = None
         self.tables = {}
 
     def read_config(self, config_file):
@@ -182,13 +301,17 @@ class ROCrateTabulator:
             "value": value,
         }
 
-    def entity_table(self, table, text):
+    def entity_table(self, table):
         """Build a db table for one type of entity"""
-        self.text_prop = text
         self.entity_table_plan(table)
         for entity_id in tqdm(list(self.fetch_ids(table))):
-            properties = list(self.fetch_entity(entity_id))
-            self.flatten_one_entity(table, entity_id, properties)
+            entity = EntityRecord(tabulator=self, table=table, entity_id=entity_id)
+            entity.build(self.fetch_properties(entity_id))
+            self.db[table].insert(entity.data, pk="entity_id", replace=True, alter=True)
+            # for junction in entity.junctions:
+            #     self.db[junction.table].insert(
+            #         junction.data, replace=True, alter=True # ? pk?
+            #     )
 
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
@@ -199,7 +322,7 @@ class ROCrateTabulator:
             self.cf["tables"][table]["junctions"] = []
         for entity_id in self.fetch_ids(table):
             prop_count = defaultdict(int)
-            for property in self.fetch_entity(entity_id):
+            for property in self.fetch_properties(entity_id):
                 label = property["property_label"]
                 prop_count[label] += 1
             for label, count in prop_count.items():
@@ -225,7 +348,7 @@ class ROCrateTabulator:
         for entity_id in [row["source_id"] for row in rows]:
             yield entity_id
 
-    def fetch_entity(self, entity_id):
+    def fetch_properties(self, entity_id):
         """return a generator which yields all properties for an entity"""
         properties = self.db.query(
             """
@@ -237,84 +360,6 @@ class ROCrateTabulator:
         )
         for prop in properties:
             yield prop
-
-    def flatten_one_entity(self, table, entity_id, properties):
-        """Add a single entity's properties to its table"""
-        # Create a dictionary to hold the properties for this entity
-        entity_data = {"entity_id": entity_id}
-        config = self.cf["tables"][table]
-        expand_props = config.get("expand_props")
-        ignore_props = config.get("ignore_props")
-        # Loop through properties and add them to entity_data
-        props = set()
-        for prop in properties:
-            name = prop["property_label"]
-            value = prop["value"]
-            target = prop["target_id"]
-            props.add(name)
-
-            if self.text_prop and name == self.text_prop:
-                try:
-                    print(f"looking for target: {target}")
-                    entity_data[name] = self.crate.get(target).fetch()
-                except TinyCrateException as e:
-                    entity_data[name] = f"load failed: {e}"
-
-            else:
-                if name in expand_props and target:
-                    props.update(
-                        self.add_expanded_property(
-                            table, entity_data, ignore_props, name, target
-                        )
-                    )
-                else:
-                    # If it's a normal property, just add it to the entity_data dictionary
-                    if name not in ignore_props:
-                        self.set_property(table, entity_data, name, value, target)
-        self.db[table].insert(entity_data, pk="entity_id", replace=True, alter=True)
-        props.update(config["all_props"])
-        config["all_props"] = list(props)
-
-    def add_expanded_property(self, table, entity_data, ignore_props, name, target):
-        """Do a subquery on a target ID to make expanded properties like
-        author_name author_id"""
-        props = set()
-        for expanded_prop in self.fetch_entity(target):
-            expanded_property_name = f"{name}_{expanded_prop['property_label']}"
-            # Special case - if this is indexable text then we want to read t
-            props.add(expanded_property_name)
-            if expanded_property_name not in ignore_props:
-                self.set_property(
-                    table,
-                    entity_data,
-                    expanded_property_name,
-                    expanded_prop["value"],
-                    expanded_prop["target_id"],
-                )
-        return props
-
-    # Both of the following mutate entity_data
-    # FIXME this needs refactoring
-
-    def set_property(self, table, entity_data, name, value, target_id):
-        """Add a property to entity_data, and add the target_id if defined"""
-        if name in self.cf["tables"][table]["junctions"]:
-            print("junctions not implemented yet", file=sys.stderr)
-        else:
-            self.set_property_name_numbered(entity_data, name, value)
-            if target_id:
-                self.set_property_name_numbered(entity_data, f"{name}_id", target_id)
-
-    def set_property_name_numbered(self, entity_data, name, value):
-        if name in entity_data:
-            # Find the first available integer to append to property_name
-            i = 1
-            while f"{name}_{i}" in entity_data:
-                i += 1
-            name = f"{name}_{i}"
-            if i > MAX_NUMBERED_COLS:
-                raise ROCrateTabulatorException(f"Too many columns for {name}")
-        entity_data[name] = value
 
     def export_csv(self):
         """Export csvs as configured"""
@@ -403,9 +448,10 @@ def cli():
         print(f"Config {args.config} not found - generating default")
         tb.infer_config()
 
+    tb.text_prop = args.text
     for table in tb.cf["tables"]:
         print(f"Building entity table for {table}")
-        tb.entity_table(table, args.text)  # should args.text be config?
+        tb.entity_table(table)
 
     tb.write_config(args.config)
     print(f"""
