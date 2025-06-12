@@ -8,12 +8,11 @@ from tqdm import tqdm
 import csv
 import json
 import requests
-import sys
 from collections import defaultdict
 
 from dataclasses import dataclass, field
 
-# FIXME: logging
+# FIXME: add real logging
 
 # TERMINOLOGY
 
@@ -26,6 +25,7 @@ from dataclasses import dataclass, field
 # [
 #   {
 #       "@id": "#adocument"
+#       "@type": "CreativeWork"
 #       "name": "Title of Document"
 #       "author": [
 #           { "@id": "#jdoe" },
@@ -34,14 +34,24 @@ from dataclasses import dataclass, field
 #   },
 #   {
 #       "@id": "#jdoe",
+#       "@type": "Person",
 #       "name": "John Doe"
 #   },
 #   {
 #       "@id": "#jroe",
+#       "@type": "Person",
 #       "name": "Jane Roe"
 #   }
 # ]
-
+#
+# this is modeled in the database as
+# Document [ id, name ]
+# Document_hasPart [ Document_id, Person_id ]
+# Person [ id, name ]
+#
+# Note that the junction table is on Type_property which means that the
+# target @ids could be of different @types - for example, Datasets could have
+# Datesets and Files as hasParts
 
 PROPERTIES = {
     "row_id": str,
@@ -90,7 +100,7 @@ class EntityRecord:
     ignore_props: list = field(default_factory=list)
     props: set = field(default_factory=set)
     data: dict = field(default_factory=dict)
-    junctions: list = field(default_factory=list)
+    junctions: dict = field(default_factory=dict)
 
     def build(self, properties):
         """Takes the properties of this entity and builds a dictionary to
@@ -100,70 +110,68 @@ class EntityRecord:
         self.text_prop = self.tabulator.text_prop
         self.expand_props = self.cf.get("expand_props", [])
         self.ignore_props = self.cf.get("ignore_props", [])
-        for prop in properties:
-            name = prop["property_label"]
-            value = prop["value"]
-            target = prop["target_id"]
-            self.props.add(name)
-            if self.text_prop and name == self.text_prop:
+        for prop_row in properties:
+            prop = prop_row["property_label"]
+            value = prop_row["value"]
+            target = prop_row["target_id"]
+            self.props.add(prop)
+            if prop == self.text_prop:
                 try:
-                    self.data[name] = self.crate.get(target).fetch()
+                    self.data[prop] = self.crate.get(target).fetch()
                 except TinyCrateException as e:
-                    self.data[name] = f"load failed: {e}"
+                    self.data[prop] = f"load failed: {e}"
             else:
-                if name in self.expand_props and target:
-                    self.add_expanded_property(name, target)
+                if prop in self.expand_props and target:
+                    self.add_expanded_property(prop, target)
                 else:
-                    if name not in self.ignore_props:
-                        self.set_property(name, value, target)
+                    if prop not in self.ignore_props:
+                        self.set_property(prop, value, target)
         self.props.update(self.cf.get("all_props"))
-        # config["all_props"] = list(props) not here FIXME
+        # Note: the props set now has all of the props - the calling code
+        # should be responsible for
 
-    def add_expanded_property(self, name, target):
+    def add_expanded_property(self, prop, target):
         """Do a subquery on a target ID to make expanded properties like
         author_name author_id"""
-        for expanded_prop in self.tabulator.fetch_properties(target):
-            expanded_property_name = f"{name}_{expanded_prop['property_label']}"
+        for ep_row in self.tabulator.fetch_properties(target):
+            expanded_prop = f"{prop}_{ep_row['property_label']}"
             # Special case - if this is indexable text then we want to read t
-            self.props.add(expanded_property_name)
-            if expanded_property_name not in self.ignore_props:
+            self.props.add(expanded_prop)
+            if expanded_prop not in self.ignore_props:
                 self.set_property(
-                    expanded_property_name,
-                    expanded_prop["value"],
-                    expanded_prop["target_id"],
+                    expanded_prop,
+                    ep_row["value"],
+                    ep_row["target_id"],
                 )
 
-    def set_property(self, name, value, target_id):
+    def set_property(self, prop, value, target_id):
         """Add a property to entity_data, and add the target_id if defined"""
-        if name in self.cf["junctions"]:
-            print("junctions not implemented yet", file=sys.stderr)
+        if prop in self.cf["junctions"]:
+            self.set_property_relational(prop, value, target_id)
         else:
-            self.set_property_name_numbered(name, value)
+            self.set_property_numbered(prop, value)
             if target_id:
-                self.set_property_name_numbered(f"{name}_id", target_id)
+                self.set_property_numbered(f"{prop}_id", target_id)
 
-    def set_property_name_numbered(self, name, value):
-        if name in self.data:
+    # TODO: we should only call this if there are more than one
+    def set_property_numbered(self, prop, value):
+        if prop in self.data:
             # Find the first available integer to append to property_name
             i = 1
-            while f"{name}_{i}" in self.data:
+            while f"{prop}_{i}" in self.data:
                 i += 1
-            name = f"{name}_{i}"
+            prop = f"{prop}_{i}"
             if i > MAX_NUMBERED_COLS:
-                raise ROCrateTabulatorException(f"Too many columns for {name}")
-        self.data[name] = value
+                raise ROCrateTabulatorException(f"Too many columns for {prop}")
+        self.data[prop] = value
 
-    def add_junctions(self, table, entity_id, junctions):
+    def set_property_relational(self, prop, value, target_id):
         """Add junctions between an entity and related entities"""
-        pass
-
-
-@dataclass
-class JunctionRecord:
-    """Class which represents a junction table"""
-
-    table: str
-    data: dict
+        # FIXME what happens to value here?
+        if prop not in self.junctions:
+            self.junctions[prop] = [target_id]
+        else:
+            self.junctions[prop].append(target_id)
 
 
 class ROCrateTabulator:
@@ -308,14 +316,23 @@ class ROCrateTabulator:
             entity = EntityRecord(tabulator=self, table=table, entity_id=entity_id)
             entity.build(self.fetch_properties(entity_id))
             self.db[table].insert(entity.data, pk="entity_id", replace=True, alter=True)
-            # for junction in entity.junctions:
-            #     self.db[junction.table].insert(
-            #         junction.data, replace=True, alter=True # ? pk?
-            #     )
+            for prop, target_ids in entity.junctions.items():
+                jtable = f"{table}_{prop}"
+                for target_id in target_ids:
+                    self.db[jtable].insert(
+                        {
+                            "entity_id": entity_id,
+                            "target_id": target_id,
+                        },
+                        pk="entity_id",
+                        replace=True,
+                        alter=True,
+                    )
 
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
         table to avoid huge numbers of expanded columns"""
+        # FIXME I think the logic here is wrong
         prop_max = defaultdict(int)
         # FIXME - should be able to force junctions with config here
         if "junctions" not in self.cf["tables"][table]:
