@@ -8,7 +8,6 @@ from tqdm import tqdm
 import csv
 import json
 import requests
-from collections import defaultdict
 import sys
 from dataclasses import dataclass, field
 
@@ -61,8 +60,6 @@ PROPERTIES = {
     "target_id": str,
     "value": str,
 }
-
-RELATIONS = {"table": str, "property_label": str, "count": int}
 
 MAX_NUMBERED_COLS = 10
 # MAX_NUMBERED_COLS = 999  # sqllite limit
@@ -349,6 +346,7 @@ class ROCrateTabulator:
             self.db[table].insert(entity.data, pk="entity_id", replace=True, alter=True)
             for prop, target_ids in entity.junctions.items():
                 jtable = f"{table}_{prop}"
+                seq = 0
                 for target_id in target_ids:
                     print(
                         f"Relation {jtable}: {entity_id} -> {target_id}",
@@ -356,34 +354,22 @@ class ROCrateTabulator:
                     )
                     self.db[jtable].insert(
                         {
+                            "seq": seq,
                             "entity_id": entity_id,
                             "target_id": target_id,
-                        },
-                        pk="entity_id",
-                        replace=True,
-                        alter=True,
+                        }
                     )
+                    seq += 1
 
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
         table to avoid huge numbers of expanded columns"""
-        # FIXME this should be done on the first pass when we build the properties
-        prop_max = defaultdict(int)
-        print(f"Planning for {table}...", file=sys.stderr)
-        # FIXME - should be able to force junctions with config here
         if "junctions" not in self.cf["tables"][table]:
             self.cf["tables"][table]["junctions"] = []
-        for entity_id in tqdm(self.fetch_ids(table)):
-            prop_count = defaultdict(int)
-            for property in self.fetch_properties(entity_id):
-                label = property["property_label"]
-                prop_count[label] += 1
-            for label, count in prop_count.items():
-                if count > prop_max[label]:
-                    prop_max[label] = count
-        for label, count in prop_max.items():
-            if count > MAX_NUMBERED_COLS:
-                print(f"{table}.{label} > {MAX_NUMBERED_COLS} members")
+        for prop_counts in self.fetch_relation_counts(table):
+            if prop_counts["n_links"] > MAX_NUMBERED_COLS:
+                label = prop_counts["property_label"]
+                print(f"{table}.{label} > {MAX_NUMBERED_COLS} relations")
                 self.cf["tables"][table]["junctions"].append(label)
 
     # Some helper methods for wrapping SQLite statements
@@ -423,6 +409,20 @@ class ROCrateTabulator:
         )
         for prop in properties:
             yield prop
+
+    def fetch_relation_counts(self, t):
+        query = """
+    SELECT p.source_id, p.property_label, count(p.target_id) as n_links
+    FROM property as p
+    WHERE p.source_id IN (
+        SELECT p.source_id
+        FROM property p
+        WHERE p.property_label = '@type' AND p.value = ?
+        )
+    GROUP BY p.source_id, p.property_label
+    ORDER BY n_links desc
+    """
+        return self.db.query(query, [t])
 
     def export_csv(self):
         """Export csvs as configured"""
