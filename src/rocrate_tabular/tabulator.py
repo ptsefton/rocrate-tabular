@@ -9,7 +9,7 @@ import csv
 import json
 import requests
 from collections import defaultdict
-
+import sys
 from dataclasses import dataclass, field
 
 # FIXME: add real logging
@@ -61,6 +61,8 @@ PROPERTIES = {
     "target_id": str,
     "value": str,
 }
+
+RELATIONS = {"table": str, "property_label": str, "count": int}
 
 MAX_NUMBERED_COLS = 10
 # MAX_NUMBERED_COLS = 999  # sqllite limit
@@ -207,14 +209,8 @@ class ROCrateTabulator:
                 "Need to run crate_to_db before infer_config"
             )
         self.cf = {"export_queries": {}, "tables": {}, "potential_tables": {}}
-        query = """
-            SELECT DISTINCT(p.value)
-            FROM property p
-            WHERE p.property_label = '@type'
-        """
-        types = self.db.query(query)
 
-        for attype in [row["value"] for row in types]:
+        for attype in self.fetch_types():
             self.cf["potential_tables"][attype] = {
                 "all_props": [],
                 "ignore_props": [],
@@ -237,8 +233,8 @@ class ROCrateTabulator:
         else:
             config_file.seek(0)
 
-    def crate_to_db(self, crate_uri, db_file):
-        """Load the crate and build the properties table"""
+    def crate_to_db(self, crate_uri, db_file, rebuild=True):
+        """Load the crate and build the properties and relations tables"""
         self.crate_dir = crate_uri
         try:
             jsonld = self._load_crate(crate_uri)
@@ -246,6 +242,11 @@ class ROCrateTabulator:
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
+        if not rebuild:
+            if not Path(db_file).is_file():
+                raise ROCrateTabulatorException(f"db file {db_file} not found")
+            self.db = Database(self.db_file)
+            return
         self.db = Database(self.db_file, recreate=True)
         properties = self.db["property"].create(PROPERTIES)
         seq = 0
@@ -261,6 +262,34 @@ class ROCrateTabulator:
     def close(self):
         """Close the connection to the SQLite database - for Windows users"""
         self.db.close()
+
+    def dump_structure(self):
+        """Testing getting metadata about relations from the database"""
+        # get all types
+
+        for t in self.fetch_types():
+            print(f"@type: {t}")
+            query = """
+    SELECT p.source_id, p.property_label, count(p.target_id) as n_links
+    FROM property as p
+    WHERE p.source_id IN (
+        SELECT p.source_id
+        FROM property p
+        WHERE p.property_label = '@type' AND p.value = ?
+        )
+    GROUP BY p.source_id, p.property_label
+    HAVING n_links > 0
+    """
+            summary = self.db.query(query, [t])
+            for row in summary:
+                if row["n_links"] > 0:
+                    print(
+                        row["source_id"]
+                        + "."
+                        + row["property_label"]
+                        + ": "
+                        + str(row["n_links"])
+                    )
 
     def _load_crate(self, crate_uri):
         if crate_uri[:4] == "http":
@@ -312,6 +341,7 @@ class ROCrateTabulator:
     def entity_table(self, table):
         """Build a db table for one type of entity"""
         self.entity_table_plan(table)
+        print(f"Building {table}...", file=sys.stderr)
         for entity_id in tqdm(list(self.fetch_ids(table))):
             entity = EntityRecord(tabulator=self, table=table, entity_id=entity_id)
             entity.build(self.fetch_properties(entity_id))
@@ -319,6 +349,10 @@ class ROCrateTabulator:
             for prop, target_ids in entity.junctions.items():
                 jtable = f"{table}_{prop}"
                 for target_id in target_ids:
+                    print(
+                        f"Relation {jtable}: {entity_id} -> {target_id}",
+                        file=sys.stderr,
+                    )
                     self.db[jtable].insert(
                         {
                             "entity_id": entity_id,
@@ -332,12 +366,13 @@ class ROCrateTabulator:
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
         table to avoid huge numbers of expanded columns"""
-        # FIXME I think the logic here is wrong
+        # FIXME this should be done on the first pass when we build the properties
         prop_max = defaultdict(int)
+        print(f"Planning for {table}...", file=sys.stderr)
         # FIXME - should be able to force junctions with config here
         if "junctions" not in self.cf["tables"][table]:
             self.cf["tables"][table]["junctions"] = []
-        for entity_id in self.fetch_ids(table):
+        for entity_id in tqdm(self.fetch_ids(table)):
             prop_count = defaultdict(int)
             for property in self.fetch_properties(entity_id):
                 label = property["property_label"]
@@ -351,6 +386,16 @@ class ROCrateTabulator:
                 self.cf["tables"][table]["junctions"].append(label)
 
     # Some helper methods for wrapping SQLite statements
+
+    def fetch_types(self):
+        """return all types in the database"""
+        rows = self.db.query("""
+            SELECT DISTINCT(p.value)
+            FROM property p
+            WHERE p.property_label = '@type'
+        """)
+        for t in [row["value"] for row in rows]:
+            yield t
 
     def fetch_ids(self, entity_type):
         """return a generator which yields all ids of this type"""
@@ -451,12 +496,30 @@ def cli():
         action="store_true",
         help="Find any CSV files and concatenate them into a table",
     )
+    ap.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Force rebuild of the database",
+    )
+    ap.add_argument(
+        "--structure",
+        action="store_true",
+        help="Report on the database structure",
+    )
     args = ap.parse_args()
 
     tb = ROCrateTabulator()
 
-    print("Building properties table")
-    tb.crate_to_db(args.crate, args.output)
+    if Path(args.output).is_file() and not args.rebuild:
+        print("Loading properties table")
+        tb.crate_to_db(args.crate, args.output, rebuild=False)
+    else:
+        print("Building properties table")
+        tb.crate_to_db(args.crate, args.output)
+
+    if args.structure:
+        tb.dump_structure()
+        sys.exit()
 
     if args.config.is_file():
         print(f"Loading config from {args.config}")
