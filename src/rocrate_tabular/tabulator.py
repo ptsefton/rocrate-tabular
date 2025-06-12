@@ -104,8 +104,8 @@ class ROCrateTabulator:
         else:
             config_file.seek(0)
 
-    def crate_to_db(self, crate_uri, db_file):
-        """Load the crate and build the properties table"""
+    def crate_to_db(self, crate_uri, db_file, rebuild=True):
+        """Load the crate and build the properties and relations tables"""
         self.crate_dir = crate_uri
         try:
             jsonld = self._load_crate(crate_uri)
@@ -113,6 +113,11 @@ class ROCrateTabulator:
         except Exception as e:
             raise ROCrateTabulatorException(f"Crate load failed: {e}")
         self.db_file = db_file
+        if not rebuild:
+            if not Path(db_file).is_file():
+                raise ROCrateTabulatorException(f"db file {db_file} not found")
+            self.db = Database(self.db_file)
+            return
         self.db = Database(self.db_file, recreate=True)
         properties = self.db["property"].create(PROPERTIES)
         seq = 0
@@ -405,10 +410,9 @@ def cli():
     )
     ap.add_argument(
         "-r",
-        "--ro-crate",
-        default=None,
-        type=Path,
-        help="Export CSVs to an RO-Crate directory",
+        "--rebuild",
+        action="store_true",
+        help="Force rebuild of the database",
     )
     ap.add_argument(
         "-c", "--config", default="config.json", type=Path, help="Configuration file"
@@ -429,8 +433,12 @@ def cli():
 
     tb = ROCrateTabulator()
 
-    print("Building properties table")
-    tb.crate_to_db(args.crate, args.output)
+    if Path(args.output).is_file() and not args.rebuild:
+        print("Loading properties table")
+        tb.crate_to_db(args.crate, args.output, rebuild=False)
+    else:
+        print("Building properties table")
+        tb.crate_to_db(args.crate, args.output)
 
     if args.config.is_file():
         print(f"Loading config from {args.config}")
@@ -451,7 +459,7 @@ Updated config file: {args.config}, edit this file to change the flattening conf
     if args.csv:
         tb.find_csv_contents()
 
-    tb.export_csv()
+    tb.export_csv(args.ro_crate)
 
 
 if __name__ == "__main__":
