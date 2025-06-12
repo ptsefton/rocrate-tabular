@@ -278,7 +278,8 @@ class ROCrateTabulator:
         WHERE p.property_label = '@type' AND p.value = ?
         )
     GROUP BY p.source_id, p.property_label
-    HAVING n_links > 0
+    ORDER BY n_links desc
+    LIMIT 1
     """
             summary = self.db.query(query, [t])
             for row in summary:
