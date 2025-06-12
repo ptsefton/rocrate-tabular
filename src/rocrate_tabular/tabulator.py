@@ -1,6 +1,6 @@
 from os import PathLike
 
-from tinycrate.tinycrate import TinyCrate, TinyCrateException
+from tinycrate.tinycrate import TinyCrate, TinyCrateException, minimal_crate
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
@@ -50,6 +50,8 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
+        self.schemaCrate = minimal_crate()
+        self.encodedProps = {}
 
     def load_config(self, config_file):
         """Load config from file"""
@@ -295,8 +297,8 @@ class ROCrateTabulator:
     def export_csv(self, rocrate_dir):
         """Export csvs as configured"""
         queries = self.cf["export_queries"]
-        print("Global props", self.global_props)
-        self.cf["global_props"] = list(self.global_props)
+        # print("Global props", self.global_props)
+        # self.cf["global_props"] = list(self.global_props)
 
         # Ensure rocrate_dir exists if it's provided
         if rocrate_dir is not None:
@@ -400,13 +402,16 @@ def cli():
     ap.add_argument(
         "crate",
         type=str,
-        help="RO-Crate URL or directory",
+        help="Input RO-Crate URL or directory",
     )
     ap.add_argument(
         "output",
         default="output.db",
         type=Path,
         help="SQLite database file",
+    )
+    ap.add_argument(
+        "--csv", default="csv", type=Path, help="Output directory for CSV files"
     )
     ap.add_argument(
         "-r",
@@ -425,7 +430,7 @@ def cli():
         help="Entities of this type will be loaded as text into the database",
     )
     ap.add_argument(
-        "--csv",
+        "--concat",
         action="store_true",
         help="Find any CSV files and concatenate them into a table",
     )
@@ -456,10 +461,10 @@ def cli():
 Updated config file: {args.config}, edit this file to change the flattening configuration or deleted it to start over
 """)
 
-    if args.csv:
+    if args.concat:
         tb.find_csv_contents()
 
-    tb.export_csv(args.ro_crate)
+    tb.export_csv(args.csv)
 
 
 if __name__ == "__main__":
