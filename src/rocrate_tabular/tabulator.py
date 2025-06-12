@@ -304,6 +304,7 @@ class ROCrateTabulator:
         if rocrate_dir is not None:
             Path(rocrate_dir).mkdir(parents=True, exist_ok=True)
         files = []
+
         for csv_filename, query in queries.items():
             files.append({"@id": csv_filename})
             result = list(self.db.query(query))

@@ -30,5 +30,18 @@ def test_export(crates, tmp_path):
 
     tb = ROCrateTabulator()
     tb.load_config(conffile)
-
     tb.crate_to_db(crates["languageFamily"], dbfile)
+
+    tb.entity_table("RepositoryObject", None)
+
+    cf = read_config(conffile)
+    cf["export_queries"] = {"lf.csv": "SELECT * FROM RepositoryObject"}
+    write_config(cf, conffile)
+
+    tb2 = ROCrateTabulator()
+    tb2.load_config(conffile)
+    tb2.crate_to_db(crates["languageFamily"], dbfile)
+
+    csvout = cwd / "csv"
+
+    tb2.export_csv(csvout)
