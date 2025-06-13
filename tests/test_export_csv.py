@@ -1,6 +1,8 @@
 from pathlib import Path
 from rocrate_tabular.tabulator import ROCrateTabulator
+from tinycrate.tinycrate import TinyCrate
 import json
+import sys
 
 
 def read_config(cffile):
@@ -34,6 +36,7 @@ def test_export(crates, tmp_path):
 
     tb.entity_table("RepositoryObject", None)
 
+    # add the export_query to build csv
     cf = read_config(conffile)
     cf["export_queries"] = {"lf.csv": "SELECT * FROM RepositoryObject"}
     write_config(cf, conffile)
@@ -41,7 +44,15 @@ def test_export(crates, tmp_path):
     tb2 = ROCrateTabulator()
     tb2.load_config(conffile)
     tb2.crate_to_db(crates["languageFamily"], dbfile)
+    tb2.entity_table("RepositoryObject", None)  # shouldn't need to rebuild it
+    print(f"Tables: {tb2.db.tables}", file=sys.stderr)
 
     csvout = cwd / "csv"
 
     tb2.export_csv(csvout)
+
+    assert (csvout / "lf.csv").is_file()
+    assert (csvout / "ro-crate-metadata.json").is_file()
+
+    csv_crate = TinyCrate(csvout / "ro-crate-metadata.json")
+    assert csv_crate
