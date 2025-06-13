@@ -340,26 +340,27 @@ class ROCrateTabulator:
         """Build a db table for one type of entity"""
         self.entity_table_plan(table)
         print(f"Building {table}...", file=sys.stderr)
+        entities = []
         for entity_id in tqdm(list(self.fetch_ids(table))):
             entity = EntityRecord(tabulator=self, table=table, entity_id=entity_id)
             entity.build(self.fetch_properties(entity_id))
-            self.db[table].insert(entity.data, pk="entity_id", replace=True, alter=True)
+            entities.append(entity.data)
             for prop, target_ids in entity.junctions.items():
                 jtable = f"{table}_{prop}"
                 seq = 0
                 for target_id in target_ids:
-                    print(
-                        f"Relation {jtable}: {entity_id} -> {target_id}",
-                        file=sys.stderr,
-                    )
                     self.db[jtable].insert(
                         {
                             "seq": seq,
                             "entity_id": entity_id,
                             "target_id": target_id,
-                        }
+                        },
+                        pk=("entity_id", "target_id"),
+                        replace=True,
+                        alter=True,
                     )
                     seq += 1
+        self.db[table].insert_all(entities, pk="entity_id", replace=True, alter=True)
 
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
