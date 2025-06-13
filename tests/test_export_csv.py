@@ -3,6 +3,7 @@ from rocrate_tabular.tabulator import ROCrateTabulator
 from tinycrate.tinycrate import TinyCrate
 import json
 import sys
+import csv
 
 
 def read_config(cffile):
@@ -15,7 +16,7 @@ def write_config(cf, cffile):
         json.dump(cf, cfh)
 
 
-def test_export(crates, tmp_path):
+def test_export(crates, csv_headers, tmp_path):
     cwd = Path(tmp_path)
     dbfile = Path(tmp_path) / "lf.db"
     conffile = cwd / "config.json"
@@ -46,13 +47,27 @@ def test_export(crates, tmp_path):
     tb2.crate_to_db(crates["languageFamily"], dbfile)
     tb2.entity_table("RepositoryObject", None)  # shouldn't need to rebuild it
     print(f"Tables: {tb2.db.tables}", file=sys.stderr)
-
     csvout = cwd / "csv"
-
     tb2.export_csv(csvout)
-
-    assert (csvout / "lf.csv").is_file()
+    assert csvout.is_dir()
+    csvfile = csvout / "lf.csv"
+    assert csvfile.is_file()
     assert (csvout / "ro-crate-metadata.json").is_file()
-
-    csv_crate = TinyCrate(csvout / "ro-crate-metadata.json")
+    csv_crate = TinyCrate(csvout)
     assert csv_crate
+
+    csv_data = {}
+    with open(csvfile, "r") as cfh:
+        head = True
+        for row in csv.reader(cfh):
+            if head:
+                assert row == csv_headers
+                head = False
+            else:
+                csv_data[row[0]] = row
+
+    orig_crate = TinyCrate(crates["languageFamily"])
+    objects = [e for e in orig_crate.all() if e.type == "RepositoryObject"]
+
+    for ro in objects:
+        assert ro["@id"] in csv_data
