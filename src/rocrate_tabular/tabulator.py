@@ -1,12 +1,13 @@
 from os import PathLike
 
-from tinycrate.tinycrate import TinyCrate, TinyCrateException
+from tinycrate.tinycrate import TinyCrate, TinyCrateException, minimal_crate
 from argparse import ArgumentParser
 from pathlib import Path
 from sqlite_utils import Database
 from tqdm import tqdm
 import csv
 import json
+import re
 import requests
 import sys
 from dataclasses import dataclass, field
@@ -178,8 +179,8 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
-        self.text_prop = None
-        self.tables = {}
+        self.schemaCrate = minimal_crate()
+        self.encodedProps = {}
 
     def read_config(self, config_file):
         """Load config from file"""
@@ -426,25 +427,83 @@ class ROCrateTabulator:
     """
         return self.db.query(query, [t])
 
-    def export_csv(self):
+    def export_csv(self, rocrate_dir):
         """Export csvs as configured"""
 
         queries = self.cf["export_queries"]
-        for csv_file, query in queries.items():
+        # print("Global props", self.global_props)
+        # self.cf["global_props"] = list(self.global_props)
+
+        # Ensure rocrate_dir exists if it's provided
+        if rocrate_dir is not None:
+            Path(rocrate_dir).mkdir(parents=True, exist_ok=True)
+        files = []
+
+        for csv_filename, query in queries.items():
+            files.append({"@id": csv_filename})
             result = list(self.db.query(query))
             # Convert result into a CSV file using csv writer
-            with open(csv_file, "w", newline="", encoding="utf-8") as csvfile:
+            csv_path = csv_filename
+            if rocrate_dir is not None:
+                csv_path = Path(rocrate_dir) / csv_filename
+            with open(csv_path, "w", newline="") as csvfile:
                 writer = csv.DictWriter(
                     csvfile, fieldnames=result[0].keys(), quoting=csv.QUOTE_MINIMAL
                 )
                 writer.writeheader()
+                # Check if the key is a string and replace newlines
+
+                keys = set()
+
                 for row in result:
                     for key, value in row.items():
                         if isinstance(value, str):
                             row[key] = value.replace("\n", "\\n").replace("\r", "\\r")
+                        keys.add(key)
                     writer.writerow(row)
 
-        # print(f"Exported data to {csv_file}")
+            # add the schema to the CSV
+            schema_id = "#SCHEMA_" + csv_filename
+            schema_props = {
+                "name": "CSVW Table schema for: " + csv_filename,
+                "columns": [],
+            }
+            for key in keys:
+                base_prop = re.sub(r".*_", "", key)
+                column_props = {
+                    "name": key,
+                    "label": base_prop,
+                }
+                uri = self.crate.resolve_term(base_prop)
+
+                if uri:
+                    column_props["propertyUrl"] = uri
+                    definition = self.crate.get(uri)
+                    if definition:
+                        print("definition", definition["rdfs:comment"])
+                        column_props["description"] = definition["rdfs:comment"]
+                # TODO -- look up local definitions and add a description
+                col_id = "#COLUMN_" + csv_filename + "_" + key
+                self.schemaCrate.add("csvw:Column", col_id, column_props)
+                schema_props["columns"].append({"@id": col_id})
+
+            self.schemaCrate.add(
+                ["File", "csvw:Table"],
+                csv_filename,
+                {
+                    "tableSchema": {"@id": schema_id},
+                    "name": "Generated export from RO-Crate: " + csv_filename,
+                },
+            )
+            self.schemaCrate.add("csvw:Schema", schema_id, schema_props)
+
+            print(f"Exported {csv_filename} to {csv_path}")
+
+        root_entity = self.schemaCrate.root()
+        root_entity["hasPart"] = files
+        root_entity["name"] = "CSV exported from RO-Crate"
+        print("Root entity updated with hasPart", root_entity, root_entity["hasPart"])
+        self.schemaCrate.write_json(rocrate_dir)
 
     def find_csv(self):
         files = self.db.query("""
@@ -476,13 +535,22 @@ def cli():
     ap.add_argument(
         "crate",
         type=str,
-        help="RO-Crate URL or directory",
+        help="Input RO-Crate URL or directory",
     )
     ap.add_argument(
         "output",
         default="output.db",
         type=Path,
         help="SQLite database file",
+    )
+    ap.add_argument(
+        "--csv", default="csv", type=Path, help="Output directory for CSV files"
+    )
+    ap.add_argument(
+        "-r",
+        "--rebuild",
+        action="store_true",
+        help="Force rebuild of the database",
     )
     ap.add_argument(
         "-c", "--config", default="config.json", type=Path, help="Configuration file"
@@ -495,7 +563,7 @@ def cli():
         help="Entities of this type will be loaded as text into the database",
     )
     ap.add_argument(
-        "--csv",
+        "--concat",
         action="store_true",
         help="Find any CSV files and concatenate them into a table",
     )
@@ -542,10 +610,10 @@ def cli():
 Updated config file: {args.config}, edit this file to change the flattening configuration or deleted it to start over
 """)
 
-    if args.csv:
+    if args.concat:
         tb.find_csv_contents()
 
-    tb.export_csv()
+    tb.export_csv(args.csv)
 
 
 if __name__ == "__main__":
