@@ -32,10 +32,10 @@ def test_export(crates, csv_headers, tmp_path):
     write_config(cf, conffile)
 
     tb = ROCrateTabulator()
-    tb.load_config(conffile)
+    tb.read_config(conffile)
     tb.crate_to_db(crates["languageFamily"], dbfile)
 
-    tb.entity_table("RepositoryObject", None)
+    tb.entity_table("RepositoryObject")
 
     # add the export_query to build csv
     cf = read_config(conffile)
@@ -43,9 +43,9 @@ def test_export(crates, csv_headers, tmp_path):
     write_config(cf, conffile)
 
     tb2 = ROCrateTabulator()
-    tb2.load_config(conffile)
+    tb2.read_config(conffile)
     tb2.crate_to_db(crates["languageFamily"], dbfile)
-    tb2.entity_table("RepositoryObject", None)  # shouldn't need to rebuild it
+    tb2.entity_table("RepositoryObject")  # shouldn't need to rebuild it
     print(f"Tables: {tb2.db.tables}", file=sys.stderr)
     csvout = cwd / "csv"
     tb2.export_csv(csvout)

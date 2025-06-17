@@ -179,6 +179,7 @@ class ROCrateTabulator:
         self.db = None
         self.crate = None
         self.cf = None
+        self.text_prop = None
         self.schemaCrate = minimal_crate()
         self.encodedProps = {}
 
