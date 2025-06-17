@@ -37,6 +37,8 @@ def test_export(crates, csv_headers, tmp_path):
 
     tb.entity_table("RepositoryObject")
 
+    tb.close()
+
     # add the export_query to build csv
     cf = read_config(conffile)
     cf["export_queries"] = {"lf.csv": "SELECT * FROM RepositoryObject"}
