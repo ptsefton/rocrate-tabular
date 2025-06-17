@@ -1,18 +1,12 @@
 from pathlib import Path
-from rocrate_tabular.tabulator import ROCrateTabulator
+from rocrate_tabular.tabulator import ROCrateTabulator, cli
 from tinycrate.tinycrate import TinyCrate
-import json
 from collections import defaultdict
+from util import read_config, write_config
 
 
-def read_config(cffile):
-    with open(cffile, "r") as cfh:
-        return json.load(cfh)
-
-
-def write_config(cf, cffile):
-    with open(cffile, "w") as cfh:
-        json.dump(cf, cfh)
+def test_smoke_cli():
+    cli()
 
 
 def test_minimal(crates, tmp_path):
