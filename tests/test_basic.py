@@ -1,12 +1,16 @@
 from pathlib import Path
-from rocrate_tabular.tabulator import ROCrateTabulator, cli
+from rocrate_tabular.tabulator import ROCrateTabulator, parse_args, main
 from tinycrate.tinycrate import TinyCrate
 from collections import defaultdict
 from util import read_config, write_config
 
 
-def test_smoke_cli():
-    cli()
+def test_smoke_cli(crates, tmp_path):
+    cwd = Path(tmp_path)
+    dbfile = cwd / "sqlite.db"
+    conffile = cwd / "config.json"
+    args = parse_args(["-c", str(conffile), crates["minimal"], str(dbfile)])
+    main(args)
 
 
 def test_minimal(crates, tmp_path):
@@ -70,7 +74,7 @@ def test_all_props(crates, tmp_path):
 
     # load the config and move the potential tables to tables
     cf = read_config(conffile)
-    cf["tables"]["Organization"] = cf["potential_tables"]["Organization"]
+    cf["tables"] = cf["potential_tables"]
     cf["potential_tables"] = []
     write_config(cf, conffile)
 

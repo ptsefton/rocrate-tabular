@@ -503,7 +503,6 @@ class ROCrateTabulator:
         root_entity = self.schemaCrate.root()
         root_entity["hasPart"] = files
         root_entity["name"] = "CSV exported from RO-Crate"
-        print("Root entity updated with hasPart", root_entity, root_entity["hasPart"])
         self.schemaCrate.write_json(rocrate_dir)
 
     def find_csv(self):
@@ -531,7 +530,7 @@ class ROCrateTabulator:
 # write an sqlite database to stdout
 
 
-def cli():
+def parse_args(arg_list=None):
     ap = ArgumentParser("RO-Crate to tables")
     ap.add_argument(
         "crate",
@@ -546,12 +545,6 @@ def cli():
     )
     ap.add_argument(
         "--csv", default="csv", type=Path, help="Output directory for CSV files"
-    )
-    ap.add_argument(
-        "-r",
-        "--rebuild",
-        action="store_true",
-        help="Force rebuild of the database",
     )
     ap.add_argument(
         "-c", "--config", default="config.json", type=Path, help="Configuration file"
@@ -578,8 +571,10 @@ def cli():
         action="store_true",
         help="Report on the database structure",
     )
-    args = ap.parse_args()
+    return ap.parse_args(arg_list)
 
+
+def main(args):
     tb = ROCrateTabulator()
 
     if Path(args.output).is_file() and not args.rebuild:
@@ -615,6 +610,11 @@ Updated config file: {args.config}, edit this file to change the flattening conf
         tb.find_csv_contents()
 
     tb.export_csv(args.csv)
+
+
+def cli():
+    args = parse_args()
+    main(args)
 
 
 if __name__ == "__main__":
