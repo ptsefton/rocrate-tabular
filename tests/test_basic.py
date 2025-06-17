@@ -1,6 +1,8 @@
 from pathlib import Path
 from rocrate_tabular.tabulator import ROCrateTabulator
+from tinycrate.tinycrate import TinyCrate
 import json
+from collections import defaultdict
 
 
 def read_config(cffile):
@@ -60,3 +62,42 @@ def test_one_to_lots(crates, tmp_path):
 
     for table in cf["tables"]:
         tb.entity_table(table)
+
+
+def test_all_props(crates, tmp_path):
+    cwd = Path(tmp_path)
+    dbfile = cwd / "sqlite.db"
+    conffile = cwd / "config.json"
+    tb = ROCrateTabulator()
+    tb.crate_to_db(crates["languageFamily"], dbfile)
+    tb.infer_config()
+    tb.write_config(conffile)
+    tb.close()
+
+    # load the config and move the potential tables to tables
+    cf = read_config(conffile)
+    cf["tables"]["Organization"] = cf["potential_tables"]["Organization"]
+    cf["potential_tables"] = []
+    write_config(cf, conffile)
+
+    tb = ROCrateTabulator()
+    tb.read_config(conffile)
+
+    tb.crate_to_db(crates["languageFamily"], dbfile)
+
+    # build our own list of all properties (excluding @ids)
+
+    tc = TinyCrate(crates["languageFamily"])
+    props = defaultdict(set)
+    for e in tc.all():
+        for prop, val in e.items():
+            if prop != "@id":
+                if type(e.type) is list:
+                    for t in e.type:
+                        props[t].add(prop)
+                else:
+                    props[e.type].add(prop)
+
+    for table in cf["tables"]:
+        all_props = tb.entity_table(table)
+        assert all_props == props[table]

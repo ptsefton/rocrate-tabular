@@ -125,9 +125,7 @@ class EntityRecord:
                 else:
                     if prop not in self.ignore_props:
                         self.set_property(prop, value, target)
-        self.props.update(self.cf.get("all_props"))
-        # Note: the props set now has all of the props - the calling code
-        # should be responsible for
+        return self.props
 
     def add_expanded_property(self, prop, target):
         """Do a subquery on a target ID to make expanded properties like
@@ -337,13 +335,15 @@ class ROCrateTabulator:
         }
 
     def entity_table(self, table):
-        """Build a db table for one type of entity"""
+        """Build a db table for one type of entity. Returns a set() of all
+        the properties found during the build"""
         self.entity_table_plan(table)
-        print(f"Building {table}...", file=sys.stderr)
         entities = []
+        allprops = set()
         for entity_id in tqdm(list(self.fetch_ids(table))):
             entity = EntityRecord(tabulator=self, table=table, entity_id=entity_id)
-            entity.build(self.fetch_properties(entity_id))
+            props = entity.build(self.fetch_properties(entity_id))
+            allprops.update(props)
             entities.append(entity.data)
             for prop, target_ids in entity.junctions.items():
                 jtable = f"{table}_{prop}"
@@ -361,6 +361,7 @@ class ROCrateTabulator:
                     )
                     seq += 1
         self.db[table].insert_all(entities, pk="entity_id", replace=True, alter=True)
+        return allprops
 
     def entity_table_plan(self, table):
         """Check entity relations to see if any need to be done as a junction
@@ -533,7 +534,8 @@ def cli():
     tb.text_prop = args.text
     for table in tb.cf["tables"]:
         print(f"Building entity table for {table}")
-        tb.entity_table(table)
+        allprops = tb.entity_table(table)
+        tb.cf["tables"][table]["all_props"] = list(allprops)
 
     tb.write_config(args.config)
     print(f"""
