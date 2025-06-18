@@ -63,13 +63,20 @@ def test_export(crates, csv_headers, tmp_path):
         head = True
         for row in csv.reader(cfh):
             if head:
-                assert row == csv_headers
+                assert row == csv_header    s
                 head = False
             else:
                 csv_data[row[0]] = row
 
     orig_crate = TinyCrate(crates["languageFamily"])
     objects = [e for e in orig_crate.all() if e.type == "RepositoryObject"]
-
+    print(f"Objects: {len(objects)}", file=sys.stderr)
     for ro in objects:
         assert ro["@id"] in csv_data
+
+
+    # Test that the csv export crate has the right CSVW schema
+    csv_crate = TinyCrate(csvout / "" )
+    colums = [e for e in csv_crate.all() if e.type == "csvw:Column"]
+    assert len(colums) == len(csv_headers);
+
